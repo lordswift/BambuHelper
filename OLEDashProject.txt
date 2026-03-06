@@ -1,0 +1,638 @@
+================================================================================
+  BAMBU LAB PRINTER MONITORING - Implementation Reference
+  For future 128x128 OLED dedicated Bambu monitoring project
+  Saved from SmallOLED-PCMonitor project (Feb 2026)
+================================================================================
+
+## PROJECT OVERVIEW
+
+Add Bambu Lab P1P/P1S/X1C printer monitoring via MQTT over TLS.
+Original target was ESP32-C3 with 128x64 OLED but ran into memory constraints
+(ESP32-C3 only has 320KB RAM, TLS needs ~40KB, existing firmware already heavy).
+
+Recommended for new project: ESP32-S3 or dedicated ESP32-C3 with 128x128 display
+and minimal other features.
+
+## KEY FINDINGS & LESSONS LEARNED
+
+1. **P1P/P1S send DELTA updates only** - After connecting, the printer only sends
+   small JSON messages with changed fields (usually just temperatures, ~100 bytes).
+   You MUST send a "pushall" command to get full status (gcode_state, progress, etc.)
+
+2. **Pushall response is LARGE** - A full pushall response can be 10-20KB.
+   PubSubClient needs a buffer large enough to receive it, or it silently drops it.
+   With 4-5KB buffer, the pushall response is dropped but the printer may start
+   sending richer delta updates after receiving the request.
+
+3. **Memory is tight on ESP32-C3** - WiFiClientSecure TLS session uses ~40KB.
+   Combined with PubSubClient buffer (4-10KB), that's 44-50KB just for Bambu.
+   On ESP32-C3 with 320KB RAM and WiFi already using ~50KB, this leaves very
+   little headroom. Use lazy allocation and heap checks.
+
+4. **TLS handshake can trigger watchdog** - The TLS handshake takes several seconds.
+   Feed esp_task_wdt_reset() before connecting and in the MQTT callback.
+
+5. **Boot loop risk** - If bambuEnabled is stored in NVS and the TLS allocation
+   fails on boot, device enters infinite reboot loop. Always defer heavy allocation
+   to loop() (lazy init), never in setup(). Add heap safety checks.
+
+6. **Buffer size tradeoff** - Larger buffer = can receive pushall but uses more RAM.
+   Smaller buffer = stable but may miss pushall responses. 4KB is safe minimum,
+   10KB is needed for full pushall, 5KB is a compromise.
+
+## MQTT PROTOCOL DETAILS
+
+- **Broker**: Printer IP, port 8883 (MQTT over TLS)
+- **TLS**: Self-signed cert, use setInsecure() for local network
+- **Username**: "bblp"
+- **Password**: LAN access code (8 chars, found in printer Settings > Network)
+- **Subscribe topic**: device/<serial_number>/report
+- **Publish topic**: device/<serial_number>/request
+
+### Pushall Request (to get full status):
+```json
+{"pushing":{"sequence_id":"0","command":"pushall"}}
+```
+Increment sequence_id for each request.
+
+### Key JSON Fields in print object:
+- gcode_state: "RUNNING", "PAUSE", "FINISH", "IDLE", "FAILED", "PREPARE"
+- mc_percent: 0-100 (print progress)
+- mc_remaining_time: minutes remaining
+- nozzle_temper: current nozzle temp (float)
+- nozzle_target_temper: target nozzle temp (float)
+- bed_temper: current bed temp (float)
+- bed_target_temper: target bed temp (float)
+- subtask_name: filename being printed
+- layer_num: current layer number
+- total_layer_num: total layers
+
+### Delta Merge Strategy:
+Messages only contain CHANGED fields. Maintain a persistent state struct and
+only update fields that appear in each message. Check field existence before
+reading (e.g., print["gcode_state"].is<const char*>()).
+
+## RECOMMENDED APPROACH FOR NEW PROJECT
+
+1. Use ESP32-S3 (more RAM) or dedicated ESP32-C3 with minimal firmware
+2. Buffer size: 10KB for full pushall support
+3. Lazy-allocate WiFiClientSecure on first connect (not in setup())
+4. Send pushall 8s after connecting, then every 30s
+5. Use ArduinoJson filter documents to minimize parse memory
+6. Feed watchdog before TLS handshake and in callback
+
+================================================================================
+  SOURCE CODE - bambulab.h
+================================================================================
+
+/*
+ * Bambu Lab Printer Monitoring Header
+ *
+ * MQTT over TLS connection to Bambu Lab printers (P1P/P1S/X1C).
+ * Read-only status monitoring: print progress, temperatures, etc.
+ */
+
+#ifndef BAMBULAB_H
+#define BAMBULAB_H
+
+#include <Arduino.h>
+
+struct BambuState {
+  bool connected;                 // MQTT connected
+  bool printing;                  // Currently printing (any active state)
+  char gcodeState[16];            // "RUNNING", "PAUSE", "FINISH", "IDLE", "FAILED"
+  uint8_t progress;               // 0-100%
+  uint16_t remainingMinutes;      // Remaining time in minutes
+  float nozzleTemp;               // Current nozzle temperature
+  float nozzleTarget;             // Target nozzle temperature
+  float bedTemp;                  // Current bed temperature
+  float bedTarget;                // Target bed temperature
+  char subtaskName[32];           // Current file name (truncated)
+  uint16_t layerNum;              // Current layer
+  uint16_t totalLayers;           // Total layers
+  unsigned long lastUpdate;       // millis() of last message
+};
+
+extern BambuState bambuState;
+
+// Initialize Bambu MQTT client (call after WiFi is connected)
+void initBambu();
+
+// Handle MQTT loop and reconnection (call every main loop iteration)
+void handleBambu();
+
+// Render printer status on OLED display
+void displayBambuStatus();
+
+#endif // BAMBULAB_H
+
+================================================================================
+  SOURCE CODE - bambulab.cpp (MQTT + TLS + JSON parsing)
+================================================================================
+
+/*
+ * Bambu Lab MQTT Client
+ *
+ * Connects to Bambu Lab printer via MQTT over TLS (port 8883).
+ * Subscribes to device/<serial>/report for print status updates.
+ * Handles P1P/P1S delta updates by merging into persistent state.
+ */
+
+#include <ArduinoJson.h>
+#include <PubSubClient.h>
+#include <WiFiClientSecure.h>
+#include <esp_task_wdt.h>
+
+// MQTT connection settings
+#define BAMBU_PORT 8883
+#define BAMBU_USERNAME "bblp"
+#define BAMBU_RECONNECT_INTERVAL 10000  // 10s between reconnect attempts
+#define BAMBU_STALE_TIMEOUT 60000       // 60s without data = stale
+#define BAMBU_BUFFER_SIZE 4096          // 4KB - deltas are small, pushall may be dropped
+                                        // Use 10240 (10KB) if you have enough RAM for full pushall
+#define BAMBU_PUSHALL_INTERVAL 30000    // Request full status every 30s
+#define BAMBU_PUSHALL_INITIAL_DELAY 8000 // Wait 8s after connect before first pushall
+#define BAMBU_MIN_FREE_HEAP 40000       // Minimum free heap to attempt TLS allocation
+
+// Global state
+BambuState bambuState;
+
+// MQTT client objects - lazily allocated on first connect attempt
+static WiFiClientSecure* bambuTlsClient = nullptr;
+static PubSubClient* bambuMqtt = nullptr;
+static bool bambuInitialized = false;
+static unsigned long lastReconnectAttempt = 0;
+static unsigned long lastPushallRequest = 0;
+static uint32_t pushallSequenceId = 0;
+static unsigned long connectTime = 0;
+static bool initialPushallSent = false;
+
+// Forward declaration
+static void bambuMqttCallback(char* topic, byte* payload, unsigned int length);
+
+// Lazy allocation of TLS+MQTT clients - called on first connect attempt
+static bool bambuEnsureClients() {
+  if (bambuTlsClient && bambuMqtt) return true;
+
+  uint32_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < BAMBU_MIN_FREE_HEAP) {
+    Serial.printf("Bambu: Not enough heap (%u < %u), skipping\n",
+                  freeHeap, BAMBU_MIN_FREE_HEAP);
+    return false;
+  }
+
+  if (!bambuTlsClient) {
+    bambuTlsClient = new (std::nothrow) WiFiClientSecure();
+    if (!bambuTlsClient) return false;
+  }
+
+  bambuTlsClient->setInsecure();  // Skip cert verification for local network
+
+  if (!bambuMqtt) {
+    bambuMqtt = new (std::nothrow) PubSubClient(*bambuTlsClient);
+    if (!bambuMqtt) {
+      delete bambuTlsClient; bambuTlsClient = nullptr;
+      return false;
+    }
+  }
+
+  // NOTE: settings.bambuIP, settings.bambuAccessCode etc come from your Settings struct
+  bambuMqtt->setServer(settings.bambuIP, BAMBU_PORT);
+  bambuMqtt->setBufferSize(BAMBU_BUFFER_SIZE);
+  bambuMqtt->setCallback(bambuMqttCallback);
+  bambuMqtt->setKeepAlive(60);
+
+  bambuInitialized = true;
+  return true;
+}
+
+void initBambu() {
+  memset(&bambuState, 0, sizeof(BambuState));
+  bambuState.connected = false;
+  bambuState.printing = false;
+  strcpy(bambuState.gcodeState, "UNKNOWN");
+
+  if (!settings.bambuEnabled || strlen(settings.bambuIP) == 0) {
+    if (bambuMqtt) { delete bambuMqtt; bambuMqtt = nullptr; }
+    if (bambuTlsClient) { delete bambuTlsClient; bambuTlsClient = nullptr; }
+    bambuInitialized = false;
+    return;
+  }
+
+  // Don't allocate here - defer to first connect attempt in handleBambu()
+  // This avoids heap pressure during setup() when WiFi+NTP are also initializing
+  initialPushallSent = false;
+  connectTime = 0;
+  lastReconnectAttempt = millis();  // Delay first connect by RECONNECT_INTERVAL
+}
+
+// Request full status dump from printer
+static void bambuRequestPushall() {
+  if (!bambuMqtt) return;
+
+  char topic[64];
+  snprintf(topic, sizeof(topic), "device/%s/request", settings.bambuSerial);
+
+  char payload[128];
+  snprintf(payload, sizeof(payload),
+           "{\"pushing\":{\"sequence_id\":\"%u\",\"command\":\"pushall\"}}",
+           pushallSequenceId++);
+
+  bambuMqtt->publish(topic, payload);
+  lastPushallRequest = millis();
+}
+
+static void bambuReconnect() {
+  if (!settings.bambuEnabled) return;
+  if (millis() - lastReconnectAttempt < BAMBU_RECONNECT_INTERVAL) return;
+
+  lastReconnectAttempt = millis();
+
+  if (!bambuEnsureClients()) return;
+  if (bambuMqtt->connected()) return;
+
+  char clientId[32];
+  snprintf(clientId, sizeof(clientId), "bambu_%08x",
+           (uint32_t)(ESP.getEfuseMac() & 0xFFFFFFFF));
+
+  esp_task_wdt_reset();  // Feed watchdog before TLS handshake
+
+  if (bambuMqtt->connect(clientId, BAMBU_USERNAME, settings.bambuAccessCode)) {
+    char topic[64];
+    snprintf(topic, sizeof(topic), "device/%s/report", settings.bambuSerial);
+    bambuMqtt->subscribe(topic);
+    bambuState.connected = true;
+    connectTime = millis();
+    initialPushallSent = false;
+  } else {
+    bambuState.connected = false;
+  }
+}
+
+void handleBambu() {
+  if (!settings.bambuEnabled) return;
+
+  if (!bambuMqtt || !bambuMqtt->connected()) {
+    bambuState.connected = false;
+    bambuReconnect();
+  } else {
+    bambuMqtt->loop();
+
+    // Delayed initial pushall
+    if (!initialPushallSent && connectTime > 0 &&
+        millis() - connectTime > BAMBU_PUSHALL_INITIAL_DELAY) {
+      esp_task_wdt_reset();
+      bambuRequestPushall();
+      initialPushallSent = true;
+    }
+
+    // Periodic pushall for fresh full status
+    if (initialPushallSent &&
+        millis() - lastPushallRequest > BAMBU_PUSHALL_INTERVAL) {
+      esp_task_wdt_reset();
+      bambuRequestPushall();
+    }
+  }
+
+  // Stale timeout
+  if (bambuState.lastUpdate > 0 &&
+      millis() - bambuState.lastUpdate > BAMBU_STALE_TIMEOUT) {
+    if (bambuState.printing) {
+      bambuState.printing = false;
+    }
+  }
+}
+
+// MQTT message callback - delta merge for P1P/P1S
+static void bambuMqttCallback(char* topic, byte* payload, unsigned int length) {
+  esp_task_wdt_reset();
+
+  // Use ArduinoJson filter to reduce memory usage
+  JsonDocument filter;
+  JsonObject printFilter = filter["print"].to<JsonObject>();
+  printFilter["gcode_state"] = true;
+  printFilter["mc_percent"] = true;
+  printFilter["mc_remaining_time"] = true;
+  printFilter["nozzle_temper"] = true;
+  printFilter["nozzle_target_temper"] = true;
+  printFilter["bed_temper"] = true;
+  printFilter["bed_target_temper"] = true;
+  printFilter["subtask_name"] = true;
+  printFilter["layer_num"] = true;
+  printFilter["total_layer_num"] = true;
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload, length,
+                                                DeserializationOption::Filter(filter));
+  if (error) return;
+
+  JsonObject print = doc["print"];
+  if (print.isNull()) return;
+
+  // Delta merge: only update fields present in this message
+  if (print["gcode_state"].is<const char*>()) {
+    const char* state = print["gcode_state"];
+    strncpy(bambuState.gcodeState, state, 15);
+    bambuState.gcodeState[15] = '\0';
+    bambuState.printing = (strcmp(state, "RUNNING") == 0 ||
+                           strcmp(state, "PAUSE") == 0 ||
+                           strcmp(state, "PREPARE") == 0);
+  }
+
+  if (print["mc_percent"].is<int>())
+    bambuState.progress = print["mc_percent"].as<int>();
+
+  if (print["mc_remaining_time"].is<int>())
+    bambuState.remainingMinutes = print["mc_remaining_time"].as<int>();
+
+  if (print["nozzle_temper"].is<float>())
+    bambuState.nozzleTemp = print["nozzle_temper"].as<float>();
+  else if (print["nozzle_temper"].is<int>())
+    bambuState.nozzleTemp = print["nozzle_temper"].as<int>();
+
+  if (print["nozzle_target_temper"].is<float>())
+    bambuState.nozzleTarget = print["nozzle_target_temper"].as<float>();
+  else if (print["nozzle_target_temper"].is<int>())
+    bambuState.nozzleTarget = print["nozzle_target_temper"].as<int>();
+
+  if (print["bed_temper"].is<float>())
+    bambuState.bedTemp = print["bed_temper"].as<float>();
+  else if (print["bed_temper"].is<int>())
+    bambuState.bedTemp = print["bed_temper"].as<int>();
+
+  if (print["bed_target_temper"].is<float>())
+    bambuState.bedTarget = print["bed_target_temper"].as<float>();
+  else if (print["bed_target_temper"].is<int>())
+    bambuState.bedTarget = print["bed_target_temper"].as<int>();
+
+  if (print["subtask_name"].is<const char*>()) {
+    const char* name = print["subtask_name"];
+    strncpy(bambuState.subtaskName, name, 31);
+    bambuState.subtaskName[31] = '\0';
+  }
+
+  if (print["layer_num"].is<int>())
+    bambuState.layerNum = print["layer_num"].as<int>();
+
+  if (print["total_layer_num"].is<int>())
+    bambuState.totalLayers = print["total_layer_num"].as<int>();
+
+  bambuState.lastUpdate = millis();
+}
+
+================================================================================
+  SOURCE CODE - bambulab_display.cpp (OLED rendering for 128x64)
+================================================================================
+
+/*
+ * Bambu Lab Display Rendering
+ *
+ * Renders printer status on 128x64 OLED display.
+ * Layout: progress bar, temperatures, time remaining, layer info, file name.
+ *
+ * For 128x128 display, you have double the vertical space - consider:
+ * - Larger progress bar
+ * - Bigger font for temperatures
+ * - Print preview or printer icon
+ * - More detailed status info
+ */
+
+void displayBambuStatus() {
+  display.setTextSize(1);
+  display.setTextColor(DISPLAY_WHITE);
+
+  // Not connected - show connecting screen
+  if (!bambuState.connected) {
+    display.setCursor(16, 20);
+    display.print("Bambu Printer");
+    display.setCursor(20, 35);
+    display.print("Connecting...");
+    return;
+  }
+
+  // Connected but not printing - show idle screen with status
+  if (!bambuState.printing && strcmp(bambuState.gcodeState, "FINISH") != 0) {
+    display.setCursor(16, 0);
+    display.print("Bambu Printer");
+
+    display.setCursor(16, 14);
+    display.print("Status: Connected");
+
+    display.setCursor(16, 26);
+    if (strcmp(bambuState.gcodeState, "UNKNOWN") == 0 ||
+        bambuState.gcodeState[0] == '\0') {
+      display.print("State:  Waiting...");
+    } else {
+      char stateBuf[22];
+      snprintf(stateBuf, sizeof(stateBuf), "State:  %s", bambuState.gcodeState);
+      display.print(stateBuf);
+    }
+
+    // Always show temperatures
+    char nozBuf[22];
+    snprintf(nozBuf, sizeof(nozBuf), "Nozzle: %.0f%cC",
+             bambuState.nozzleTemp, 0xF8);  // 0xF8 = degree symbol
+    display.setCursor(16, 40);
+    display.print(nozBuf);
+
+    char bedBuf[22];
+    snprintf(bedBuf, sizeof(bedBuf), "Bed:    %.0f%cC",
+             bambuState.bedTemp, 0xF8);
+    display.setCursor(16, 52);
+    display.print(bedBuf);
+
+    return;
+  }
+
+  // === Active Print / Finished Screen ===
+
+  // Line 1 (y=0): Progress bar with percentage
+  int barWidth = 80;
+  int barX = 0;
+  int fillWidth = (bambuState.progress * (barWidth - 2)) / 100;
+  display.drawRect(barX, 0, barWidth, 8, DISPLAY_WHITE);
+  if (fillWidth > 0) {
+    display.fillRect(barX + 1, 1, fillWidth, 6, DISPLAY_WHITE);
+  }
+  char pctBuf[8];
+  snprintf(pctBuf, sizeof(pctBuf), "%d%%", bambuState.progress);
+  display.setCursor(barX + barWidth + 4, 0);
+  display.print(pctBuf);
+
+  // Line 2 (y=12): Nozzle temperature
+  char line2[22];
+  snprintf(line2, sizeof(line2), "Nozzle: %.0f/%.0f%cC",
+           bambuState.nozzleTemp, bambuState.nozzleTarget, 0xF8);
+  display.setCursor(0, 12);
+  display.print(line2);
+
+  // Line 3 (y=24): Bed temperature
+  char line3[22];
+  snprintf(line3, sizeof(line3), "Bed:    %.0f/%.0f%cC",
+           bambuState.bedTemp, bambuState.bedTarget, 0xF8);
+  display.setCursor(0, 24);
+  display.print(line3);
+
+  // Line 4 (y=36): Time remaining
+  display.setCursor(0, 36);
+  if (strcmp(bambuState.gcodeState, "FINISH") == 0) {
+    display.print("Finished!");
+  } else {
+    uint16_t hrs = bambuState.remainingMinutes / 60;
+    uint16_t mins = bambuState.remainingMinutes % 60;
+    char timeBuf[22];
+    if (hrs > 0) {
+      snprintf(timeBuf, sizeof(timeBuf), "Time:   %dh %dm left", hrs, mins);
+    } else {
+      snprintf(timeBuf, sizeof(timeBuf), "Time:   %dm left", mins);
+    }
+    display.print(timeBuf);
+  }
+
+  // Line 5 (y=48): Layer info or state
+  display.setCursor(0, 48);
+  if (bambuState.totalLayers > 0) {
+    char layerBuf[22];
+    snprintf(layerBuf, sizeof(layerBuf), "Layer:  %d/%d",
+             bambuState.layerNum, bambuState.totalLayers);
+    display.print(layerBuf);
+  } else {
+    char stateBuf[22];
+    snprintf(stateBuf, sizeof(stateBuf), "State:  %s", bambuState.gcodeState);
+    display.print(stateBuf);
+  }
+
+  // Line 6 (y=56): File name (truncated to fit screen)
+  if (bambuState.subtaskName[0] != '\0') {
+    display.setCursor(0, 56);
+    char truncated[22];
+    strncpy(truncated, bambuState.subtaskName, 21);
+    truncated[21] = '\0';
+    display.print(truncated);
+  }
+}
+
+================================================================================
+  WEB INTERFACE - HTML for Bambu Lab settings section
+================================================================================
+
+The web interface adds a collapsible "Bambu Lab Printer" section with:
+- Enable/disable checkbox
+- Connection status banner (green = connected, red = not connected, gray = disabled)
+- Printer IP address field
+- Serial number field
+- LAN access code field (8 chars)
+- Auto-switch checkbox (auto-show printer screen when printing detected)
+
+HTML snippet (embedded in C++ raw string):
+
+<!-- Bambu Lab Section -->
+<div class="section-header" onclick="toggleSection('bambuSection')">
+  <h3>&#127981; Bambu Lab Printer</h3>
+  <span class="section-arrow">&#9660;</span>
+</div>
+<div id="bambuSection" class="section-content collapsed">
+  <div class="card">
+    <div style="display: flex; align-items: center; margin-bottom: 15px;">
+      <input type="checkbox" name="bambuEnabled" id="bambuEnabled" value="1" {checked}>
+      <label for="bambuEnabled">Enable Bambu Lab Monitoring</label>
+    </div>
+    <div style="background: #0f172a; padding: 10px; border-radius: 5px; margin-bottom: 15px;
+                border-left: 3px solid {statusColor};">
+      <span style="color: {statusColor}; font-weight: bold;">Status: {statusText}</span>
+    </div>
+    <p style="color: #888; font-size: 12px;">
+      Subscribe to printer status via MQTT (read-only). Requires LAN mode enabled on printer.
+    </p>
+    <label for="bambuIP">Printer IP Address</label>
+    <input type="text" name="bambuIP" id="bambuIP" value="{ip}"
+           placeholder="192.168.1.xxx" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+    <label for="bambuSerial">Printer Serial Number</label>
+    <input type="text" name="bambuSerial" id="bambuSerial" value="{serial}"
+           placeholder="01P00A000000000" maxlength="19">
+    <label for="bambuAccessCode">LAN Access Code</label>
+    <input type="text" name="bambuAccessCode" id="bambuAccessCode" value="{code}"
+           placeholder="12345678" maxlength="8">
+    <div style="display: flex; align-items: center;">
+      <input type="checkbox" name="bambuAutoSwitch" id="bambuAutoSwitch" value="1" {autoChecked}>
+      <label for="bambuAutoSwitch">Auto-switch to printer screen when printing</label>
+    </div>
+  </div>
+</div>
+
+================================================================================
+  SETTINGS - NVS keys for Bambu configuration
+================================================================================
+
+Settings struct fields:
+  bool bambuEnabled;           // NVS key: "bambuOn"
+  char bambuIP[16];            // NVS key: "bambuIP"
+  char bambuSerial[20];        // NVS key: "bambuSerial"
+  char bambuAccessCode[12];    // NVS key: "bambuCode"
+  bool bambuAutoSwitch;        // NVS key: "bambuAuto"
+
+================================================================================
+  MAIN.CPP INTEGRATION POINTS
+================================================================================
+
+In setup():
+  initBambu();  // After setupWebServer()
+
+In loop():
+  handleBambu();  // After handleUDP()
+
+Display mode logic:
+  bool showBambu = false;
+  if (settings.bambuEnabled && bambuState.connected &&
+      settings.bambuAutoSwitch && bambuState.printing && !showStats) {
+    showBambu = true;
+  }
+
+  if (showStats) {
+    displayStats();
+  } else if (showBambu) {
+    displayBambuStatus();
+  } else {
+    // clock modes...
+  }
+
+Refresh rate (in getOptimalRefreshRate()):
+  if (settings.bambuEnabled && bambuState.connected && bambuState.printing) {
+    return 2;  // 2 Hz - printer updates every few seconds
+  }
+
+================================================================================
+  PLATFORMIO.INI - Required library
+================================================================================
+
+lib_deps:
+  knolleary/PubSubClient@^2.8
+
+================================================================================
+  MEMORY BUDGET (ESP32-C3, 320KB RAM)
+================================================================================
+
+| Component                    | RAM       |
+|------------------------------|-----------|
+| WiFiClientSecure TLS session | ~40KB     |
+| PubSubClient buffer (4KB)   | 4KB       |
+| PubSubClient buffer (10KB)  | 10KB      |
+| BambuState struct            | ~90 bytes |
+| ArduinoJson (parse only)     | ~1.5KB temp |
+| Total (4KB buffer)           | ~45KB     |
+| Total (10KB buffer)          | ~51KB     |
+
+WARNING: On ESP32-C3 with WiFi (~50KB) + existing app (~30KB), only ~190KB
+remains. The 45-51KB for Bambu leaves ~140KB which is marginal. A dedicated
+device with minimal firmware would have much more headroom.
+
+================================================================================
+  PRINTER CREDENTIALS (for testing)
+================================================================================
+
+Printer: Bambu Lab P1P
+IP: 192.168.0.41
+Serial: 01P00A441301110
+LAN Access Code: 25458e19
+
+================================================================================

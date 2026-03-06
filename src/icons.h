@@ -1,0 +1,185 @@
+#ifndef ICONS_H
+#define ICONS_H
+
+#include <Arduino.h>
+
+// 16x16 1-bit icons stored as PROGMEM byte arrays (1 bit per pixel).
+// Draw with: for each bit, if set draw accentColor, else skip (transparent).
+// Row-major, MSB first. 16 pixels wide = 2 bytes per row, 16 rows = 32 bytes.
+
+// Nozzle / hotend icon (16x16)
+const uint8_t PROGMEM icon_nozzle[] = {
+  0x03, 0xC0,  //     ####
+  0x07, 0xE0,  //    ######
+  0x0F, 0xF0,  //   ########
+  0x0F, 0xF0,  //   ########
+  0x0F, 0xF0,  //   ########
+  0x07, 0xE0,  //    ######
+  0x07, 0xE0,  //    ######
+  0x0F, 0xF0,  //   ########
+  0x1F, 0xF8,  //  ##########
+  0x1F, 0xF8,  //  ##########
+  0x0F, 0xF0,  //   ########
+  0x07, 0xE0,  //    ######
+  0x03, 0xC0,  //     ####
+  0x01, 0x80,  //      ##
+  0x01, 0x80,  //      ##
+  0x00, 0x00,  //
+};
+
+// Bed / platform icon (16x16)
+const uint8_t PROGMEM icon_bed[] = {
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x7F, 0xFE,  //  ##############
+  0xFF, 0xFF,  // ################
+  0xFF, 0xFF,  // ################
+  0x7F, 0xFE,  //  ##############
+  0x30, 0x0C,  //   ##        ##
+  0x30, 0x0C,  //   ##        ##
+  0x30, 0x0C,  //   ##        ##
+  0x78, 0x1E,  //  ####      ####
+  0x00, 0x00,  //
+};
+
+// Fan icon (16x16)
+const uint8_t PROGMEM icon_fan[] = {
+  0x00, 0x00,  //
+  0x03, 0x80,  //      ###
+  0x07, 0xC0,  //     #####
+  0x07, 0xC0,  //     #####
+  0x03, 0xC0,  //      ####
+  0x03, 0xE0,  //      #####
+  0x71, 0xF0,  //  ###   #####
+  0xF9, 0x9F,  // #####  ##  #####
+  0xF9, 0x9F,  // #####  ##  #####
+  0x0F, 0x8E,  //     #####   ###
+  0x07, 0xC0,  //     #####
+  0x03, 0xC0,  //      ####
+  0x03, 0xE0,  //      #####
+  0x03, 0xE0,  //      #####
+  0x01, 0xC0,  //       ###
+  0x00, 0x00,  //
+};
+
+// Clock icon (16x16)
+const uint8_t PROGMEM icon_clock[] = {
+  0x07, 0xE0,  //      ######
+  0x1F, 0xF8,  //    ##########
+  0x3F, 0xFC,  //   ############
+  0x38, 0x1C,  //   ###      ###
+  0x71, 0x8E,  //  ###  ##   ###
+  0x61, 0x86,  //  ##   ##    ##
+  0xE1, 0x87,  // ###   ##    ###
+  0xC1, 0x83,  // ##    ##     ##
+  0xC1, 0xF3,  // ##    #######
+  0xC0, 0x73,  // ##      ###  ##
+  0xE0, 0x07,  // ###        ###
+  0x60, 0x06,  //  ##        ##
+  0x70, 0x0E,  //  ###      ###
+  0x3F, 0xFC,  //   ############
+  0x1F, 0xF8,  //    ##########
+  0x07, 0xE0,  //      ######
+};
+
+// Layer / stack icon (16x16)
+const uint8_t PROGMEM icon_layers[] = {
+  0x00, 0x00,  //
+  0x01, 0x80,  //       ##
+  0x07, 0xE0,  //      ######
+  0x1F, 0xF8,  //    ##########
+  0x7F, 0xFE,  //  ##############
+  0x1F, 0xF8,  //    ##########
+  0x07, 0xE0,  //      ######
+  0x1F, 0xF8,  //    ##########
+  0x7F, 0xFE,  //  ##############
+  0x1F, 0xF8,  //    ##########
+  0x07, 0xE0,  //      ######
+  0x1F, 0xF8,  //    ##########
+  0x7F, 0xFE,  //  ##############
+  0x1F, 0xF8,  //    ##########
+  0x07, 0xE0,  //      ######
+  0x00, 0x00,  //
+};
+
+// WiFi signal icon (16x16) - full strength
+const uint8_t PROGMEM icon_wifi[] = {
+  0x00, 0x00,  //
+  0x07, 0xE0,  //      ######
+  0x1F, 0xF8,  //    ##########
+  0x38, 0x1C,  //   ###      ###
+  0x60, 0x06,  //  ##          ##
+  0x0F, 0xF0,  //     ########
+  0x1C, 0x38,  //    ###    ###
+  0x10, 0x08,  //    #        #
+  0x07, 0xE0,  //      ######
+  0x0C, 0x30,  //     ##    ##
+  0x00, 0x00,  //
+  0x01, 0x80,  //       ##
+  0x03, 0xC0,  //      ####
+  0x01, 0x80,  //       ##
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+};
+
+// Checkmark icon (16x16)
+const uint8_t PROGMEM icon_check[] = {
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+  0x00, 0x06,  //              ##
+  0x00, 0x0E,  //             ###
+  0x00, 0x1C,  //            ###
+  0x00, 0x38,  //           ###
+  0x00, 0x70,  //          ###
+  0x00, 0xE0,  //         ###
+  0xC1, 0xC0,  // ##     ###
+  0xE3, 0x80,  // ###   ###
+  0x77, 0x00,  //  ### ###
+  0x3E, 0x00,  //   #####
+  0x1C, 0x00,  //    ###
+  0x08, 0x00,  //     #
+  0x00, 0x00,  //
+  0x00, 0x00,  //
+};
+
+// File / gcode icon (16x16)
+const uint8_t PROGMEM icon_file[] = {
+  0x1F, 0x80,  //    ######
+  0x10, 0xC0,  //    #    ##
+  0x10, 0x60,  //    #     ##
+  0x10, 0x30,  //    #      ##
+  0x10, 0x1E,  //    #     ####
+  0x10, 0x02,  //    #        #
+  0x10, 0x02,  //    #        #
+  0x10, 0x02,  //    #        #
+  0x17, 0xC2,  //    # #####  #
+  0x17, 0xC2,  //    # #####  #
+  0x10, 0x02,  //    #        #
+  0x17, 0x82,  //    # ####   #
+  0x17, 0x82,  //    # ####   #
+  0x10, 0x02,  //    #        #
+  0x1F, 0xFE,  //    ##########
+  0x00, 0x00,  //
+};
+
+// Helper: draw a 16x16 1-bit icon at (x, y) with given color, transparent bg
+inline void drawIcon16(TFT_eSPI& tft, int16_t x, int16_t y,
+                       const uint8_t* icon, uint16_t color) {
+  for (int row = 0; row < 16; row++) {
+    uint8_t b0 = pgm_read_byte(&icon[row * 2]);
+    uint8_t b1 = pgm_read_byte(&icon[row * 2 + 1]);
+    uint16_t bits = (b0 << 8) | b1;
+    for (int col = 0; col < 16; col++) {
+      if (bits & (0x8000 >> col)) {
+        tft.drawPixel(x + col, y + row, color);
+      }
+    }
+  }
+}
+
+#endif // ICONS_H
