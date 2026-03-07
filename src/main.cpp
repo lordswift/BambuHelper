@@ -8,6 +8,7 @@
 #include "bambu_state.h"
 
 static unsigned long splashEnd = 0;
+static unsigned long finishScreenStart = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -43,18 +44,38 @@ void loop() {
     BambuState& s = activePrinter().state;
     ScreenState current = getScreenState();
 
-    if (!s.connected && current != SCREEN_CONNECTING_MQTT) {
+    if (!s.connected && current != SCREEN_CONNECTING_MQTT && current != SCREEN_OFF) {
       setScreenState(SCREEN_CONNECTING_MQTT);
-    } else if (s.connected && s.printing && current != SCREEN_PRINTING) {
-      setScreenState(SCREEN_PRINTING);
+      finishScreenStart = 0;
+    } else if (!s.connected && current == SCREEN_OFF) {
+      // Stay off when printer is disconnected/off
+    } else if (s.connected && s.printing) {
+      if (current != SCREEN_PRINTING) {
+        setScreenState(SCREEN_PRINTING);
+        finishScreenStart = 0;
+      }
     } else if (s.connected && !s.printing &&
-               strcmp(s.gcodeState, "FINISH") == 0 &&
-               current != SCREEN_FINISHED) {
-      setScreenState(SCREEN_FINISHED);
+               strcmp(s.gcodeState, "FINISH") == 0) {
+      if (current != SCREEN_FINISHED && current != SCREEN_OFF) {
+        setScreenState(SCREEN_FINISHED);
+        finishScreenStart = millis();
+      }
+      // Auto-off after finish timeout (unless keepDisplayOn)
+      if (current == SCREEN_FINISHED && !dpSettings.keepDisplayOn &&
+          dpSettings.finishDisplayMins > 0 && finishScreenStart > 0 &&
+          millis() - finishScreenStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL) {
+        setScreenState(SCREEN_OFF);
+      }
     } else if (s.connected && !s.printing &&
-               strcmp(s.gcodeState, "FINISH") != 0 &&
-               current != SCREEN_IDLE) {
-      setScreenState(SCREEN_IDLE);
+               strcmp(s.gcodeState, "FINISH") != 0) {
+      if (current == SCREEN_OFF) {
+        // Printer woke up from off state — restore display
+        setBacklight(brightness);
+      }
+      if (current != SCREEN_IDLE) {
+        setScreenState(SCREEN_IDLE);
+        finishScreenStart = 0;
+      }
     }
   }
 

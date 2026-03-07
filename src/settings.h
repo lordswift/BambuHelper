@@ -24,10 +24,28 @@ struct DisplaySettings {
   GaugeColors chamberFan;
 };
 
+// Network settings
+struct NetworkSettings {
+  bool useDHCP;           // true = DHCP, false = static
+  char staticIP[16];
+  char gateway[16];
+  char subnet[16];
+  char dns[16];
+  bool showIPAtStartup;   // show IP screen for 3s after WiFi connects
+};
+
+// Display power settings
+struct DisplayPowerSettings {
+  uint16_t finishDisplayMins;  // minutes to show finish screen (0 = keep on)
+  bool keepDisplayOn;          // override: never turn off display
+};
+
 extern char wifiSSID[33];
 extern char wifiPass[65];
 extern uint8_t brightness;
 extern DisplaySettings dispSettings;
+extern NetworkSettings netSettings;
+extern DisplayPowerSettings dpSettings;
 
 void loadSettings();
 void saveSettings();

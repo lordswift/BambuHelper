@@ -104,6 +104,29 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
 </div>
 
 <div class="card">
+  <h2>Network</h2>
+  <label for="netmode">IP Assignment</label>
+  <select name="netmode" id="netmode" onchange="toggleStatic()">
+    <option value="dhcp" %NET_DHCP%>DHCP (automatic)</option>
+    <option value="static" %NET_STATIC%>Static IP</option>
+  </select>
+  <div id="staticFields" style="display:none">
+    <label for="net_ip">IP Address</label>
+    <input type="text" name="net_ip" id="net_ip" value="%NET_IP%" placeholder="192.168.1.100">
+    <label for="net_gw">Gateway</label>
+    <input type="text" name="net_gw" id="net_gw" value="%NET_GW%" placeholder="192.168.1.1">
+    <label for="net_sn">Subnet Mask</label>
+    <input type="text" name="net_sn" id="net_sn" value="%NET_SN%" placeholder="255.255.255.0">
+    <label for="net_dns">DNS Server</label>
+    <input type="text" name="net_dns" id="net_dns" value="%NET_DNS%" placeholder="8.8.8.8">
+  </div>
+  <div class="check-row">
+    <input type="checkbox" name="showip" id="showip" value="1" %SHOWIP%>
+    <label for="showip">Show IP at startup (3s)</label>
+  </div>
+</div>
+
+<div class="card">
   <h2>Printer Settings</h2>
   <div id="printerStatus" class="%STATUS_CLASS%">%STATUS_TEXT%</div>
   <div class="check-row">
@@ -137,6 +160,13 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
     <option value="2" %ROT2%>180&deg;</option>
     <option value="3" %ROT3%>270&deg;</option>
   </select>
+
+  <label for="fmins">Display off after print complete (minutes, 0 = never)</label>
+  <input type="number" name="fmins" id="fmins" min="0" max="999" value="%FMINS%">
+  <div class="check-row">
+    <input type="checkbox" name="keepon" id="keepon" value="1" %KEEPON%>
+    <label for="keepon">Keep display always on (override timeout)</label>
+  </div>
 </div>
 
 <div class="card">
@@ -222,6 +252,12 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         onclick="if(confirm('Reset all settings?'))location='/reset'">Factory Reset</button>
 
 <script>
+function toggleStatic(){
+  var m=document.getElementById('netmode').value;
+  document.getElementById('staticFields').style.display=(m==='static')?'block':'none';
+}
+toggleStatic();
+
 var themes={
   default:{bg:'#081018',track:'#182028',
     prg:{a:'#00FF00',l:'#00FF00',v:'#FFFFFF'},
@@ -300,6 +336,7 @@ function applyDisplay(){
 setInterval(function(){
   fetch('/status').then(r=>r.json()).then(d=>{
     var h='';
+    if(d.display_off) h+='<div class="stat-row"><span>Display:</span><span class="stat-val" style="color:#F85149">Off</span></div>';
     if(d.connected){
       h+='<div class="stat-row"><span>State:</span><span class="stat-val">'+d.state+'</span></div>';
       h+='<div class="stat-row"><span>Nozzle:</span><span class="stat-val">'+d.nozzle+'/'+d.nozzle_t+'&deg;C</span></div>';
@@ -307,12 +344,15 @@ setInterval(function(){
       if(d.progress>0) h+='<div class="stat-row"><span>Progress:</span><span class="stat-val">'+d.progress+'%</span></div>';
       if(d.fan>0) h+='<div class="stat-row"><span>Fan:</span><span class="stat-val">'+d.fan+'%</span></div>';
     } else {
-      h='<span style="color:#8B949E">Not connected</span>';
+      h+='<span style="color:#8B949E">Not connected (printer may be off)</span>';
     }
     document.getElementById('liveStats').innerHTML=h;
     var ps=document.getElementById('printerStatus');
-    ps.className='status '+(d.connected?'status-ok':(d.enabled?'status-off':'status-na'));
-    ps.textContent=d.connected?'Connected':(d.enabled?'Disconnected':'Disabled');
+    var cls=d.connected?'status-ok':(d.enabled?'status-off':'status-na');
+    var txt=d.connected?'Connected':(d.enabled?'Disconnected / Printer Off':'Disabled');
+    if(d.display_off){cls='status-na';txt+=' (Display Off)';}
+    ps.className='status '+cls;
+    ps.textContent=txt;
   }).catch(function(){});
 }, 3000);
 </script>
@@ -357,11 +397,24 @@ static String processTemplate(const String& html) {
   page.replace("%CODE%", cfg.accessCode);
   page.replace("%BRIGHT%", String(brightness));
 
+  // Network settings
+  page.replace("%NET_DHCP%", netSettings.useDHCP ? "selected" : "");
+  page.replace("%NET_STATIC%", netSettings.useDHCP ? "" : "selected");
+  page.replace("%NET_IP%", netSettings.staticIP);
+  page.replace("%NET_GW%", netSettings.gateway);
+  page.replace("%NET_SN%", netSettings.subnet);
+  page.replace("%NET_DNS%", netSettings.dns);
+  page.replace("%SHOWIP%", netSettings.showIPAtStartup ? "checked" : "");
+
   // Rotation dropdown
   page.replace("%ROT0%", dispSettings.rotation == 0 ? "selected" : "");
   page.replace("%ROT1%", dispSettings.rotation == 1 ? "selected" : "");
   page.replace("%ROT2%", dispSettings.rotation == 2 ? "selected" : "");
   page.replace("%ROT3%", dispSettings.rotation == 3 ? "selected" : "");
+
+  // Display power
+  page.replace("%FMINS%", String(dpSettings.finishDisplayMins));
+  page.replace("%KEEPON%", dpSettings.keepDisplayOn ? "checked" : "");
 
   // Global colors
   char buf[8];
@@ -426,6 +479,11 @@ static void readDisplayFromForm() {
   readGaugeColorsFromForm("pfn", dispSettings.partFan);
   readGaugeColorsFromForm("afn", dispSettings.auxFan);
   readGaugeColorsFromForm("cfn", dispSettings.chamberFan);
+
+  if (server.hasArg("fmins")) {
+    dpSettings.finishDisplayMins = server.arg("fmins").toInt();
+  }
+  dpSettings.keepDisplayOn = server.hasArg("keepon");
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +505,14 @@ static void handleSave() {
 
   PrinterConfig& cfg = printers[0].config;
   cfg.enabled = server.hasArg("enabled");
+
+  // Network settings
+  netSettings.useDHCP = (!server.hasArg("netmode") || server.arg("netmode") == "dhcp");
+  if (server.hasArg("net_ip"))  strlcpy(netSettings.staticIP, server.arg("net_ip").c_str(), sizeof(netSettings.staticIP));
+  if (server.hasArg("net_gw"))  strlcpy(netSettings.gateway, server.arg("net_gw").c_str(), sizeof(netSettings.gateway));
+  if (server.hasArg("net_sn"))  strlcpy(netSettings.subnet, server.arg("net_sn").c_str(), sizeof(netSettings.subnet));
+  if (server.hasArg("net_dns")) strlcpy(netSettings.dns, server.arg("net_dns").c_str(), sizeof(netSettings.dns));
+  netSettings.showIPAtStartup = server.hasArg("showip");
 
   if (server.hasArg("pname")) strlcpy(cfg.name, server.arg("pname").c_str(), sizeof(cfg.name));
   if (server.hasArg("ip"))    strlcpy(cfg.ip, server.arg("ip").c_str(), sizeof(cfg.ip));
@@ -488,6 +554,7 @@ static void handleStatus() {
   doc["fan"] = st.coolingFanPct;
   doc["layer"] = st.layerNum;
   doc["layers"] = st.totalLayers;
+  doc["display_off"] = (getScreenState() == SCREEN_OFF);
 
   String json;
   serializeJson(doc, json);

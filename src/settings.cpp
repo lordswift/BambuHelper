@@ -9,6 +9,8 @@ char wifiSSID[33] = {0};
 char wifiPass[65] = {0};
 uint8_t brightness = 200;
 DisplaySettings dispSettings;
+NetworkSettings netSettings;
+DisplayPowerSettings dpSettings;
 
 static Preferences prefs;
 
@@ -131,6 +133,18 @@ void loadSettings() {
   loadGaugeColors("gc_afn", dispSettings.auxFan, def.auxFan);
   loadGaugeColors("gc_cfn", dispSettings.chamberFan, def.chamberFan);
 
+  // Network settings
+  netSettings.useDHCP = prefs.getBool("net_dhcp", true);
+  strlcpy(netSettings.staticIP, prefs.getString("net_ip", "").c_str(), sizeof(netSettings.staticIP));
+  strlcpy(netSettings.gateway, prefs.getString("net_gw", "").c_str(), sizeof(netSettings.gateway));
+  strlcpy(netSettings.subnet, prefs.getString("net_sn", "255.255.255.0").c_str(), sizeof(netSettings.subnet));
+  strlcpy(netSettings.dns, prefs.getString("net_dns", "").c_str(), sizeof(netSettings.dns));
+  netSettings.showIPAtStartup = prefs.getBool("net_showip", true);
+
+  // Display power settings
+  dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
+  dpSettings.keepDisplayOn = prefs.getBool("dp_keepon", false);
+
   prefs.end();
 }
 
@@ -160,6 +174,18 @@ void saveSettings() {
   saveGaugeColors("gc_pfn", dispSettings.partFan);
   saveGaugeColors("gc_afn", dispSettings.auxFan);
   saveGaugeColors("gc_cfn", dispSettings.chamberFan);
+
+  // Network settings
+  prefs.putBool("net_dhcp", netSettings.useDHCP);
+  prefs.putString("net_ip", netSettings.staticIP);
+  prefs.putString("net_gw", netSettings.gateway);
+  prefs.putString("net_sn", netSettings.subnet);
+  prefs.putString("net_dns", netSettings.dns);
+  prefs.putBool("net_showip", netSettings.showIPAtStartup);
+
+  // Display power settings
+  prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
+  prefs.putBool("dp_keepon", dpSettings.keepDisplayOn);
 
   prefs.end();
 }

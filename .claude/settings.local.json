@@ -3,7 +3,8 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(~/.platformio/penv/Scripts/pio run)"
+      "Bash(~/.platformio/penv/Scripts/pio run)",
+      "Bash(~/.platformio/penv/Scripts/platformio run)"
     ]
   }
 }

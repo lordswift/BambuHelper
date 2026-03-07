@@ -6,6 +6,7 @@
 #include "bambu_state.h"
 #include "settings.h"
 #include <SPI.h>
+#include <WiFi.h>
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -152,7 +153,31 @@ static void drawConnectingWiFi() {
   tft.setTextColor(CLR_TEXT, CLR_BG);
   tft.drawString("Connecting to WiFi", SCREEN_W / 2, SCREEN_H / 2 + 20);
 
-  drawAnimDots(tft, SCREEN_W / 2 + 54, SCREEN_H / 2 + 14, CLR_TEXT);
+  int16_t tw = tft.textWidth("Connecting to WiFi");
+  drawAnimDots(tft, SCREEN_W / 2 + tw / 2, SCREEN_H / 2 + 14, CLR_TEXT);
+}
+
+// ---------------------------------------------------------------------------
+//  Screen: WiFi Connected (show IP)
+// ---------------------------------------------------------------------------
+static void drawWiFiConnected() {
+  if (!forceRedraw) return;
+
+  tft.setTextDatum(MC_DATUM);
+
+  // Checkmark circle
+  tft.fillCircle(SCREEN_W / 2, SCREEN_H / 2 - 40, 25, CLR_GREEN);
+  tft.setTextColor(CLR_BG, CLR_GREEN);
+  tft.setTextFont(4);
+  tft.drawChar('Y', SCREEN_W / 2 - 7, SCREEN_H / 2 - 53);  // crude check
+
+  tft.setTextColor(CLR_GREEN, CLR_BG);
+  tft.setTextFont(4);
+  tft.drawString("WiFi Connected", SCREEN_W / 2, SCREEN_H / 2 + 10);
+
+  tft.setTextColor(CLR_TEXT, CLR_BG);
+  tft.setTextFont(2);
+  tft.drawString(WiFi.localIP().toString().c_str(), SCREEN_W / 2, SCREEN_H / 2 + 40);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +192,8 @@ static void drawConnectingMQTT() {
   tft.setTextColor(CLR_TEXT, CLR_BG);
   tft.drawString("Connecting to Printer", SCREEN_W / 2, SCREEN_H / 2 + 20);
 
-  drawAnimDots(tft, SCREEN_W / 2 + 64, SCREEN_H / 2 + 14, CLR_TEXT);
+  int16_t tw = tft.textWidth("Connecting to Printer");
+  drawAnimDots(tft, SCREEN_W / 2 + tw / 2, SCREEN_H / 2 + 14, CLR_TEXT);
 
   // Show printer name/IP
   PrinterSlot& p = activePrinter();
@@ -415,7 +441,11 @@ void updateDisplay() {
 
   // Detect screen change
   if (currentScreen != prevScreen) {
-    tft.fillScreen(dispSettings.bgColor);
+    // Restore backlight when leaving SCREEN_OFF
+    if (prevScreen == SCREEN_OFF && currentScreen != SCREEN_OFF) {
+      setBacklight(brightness);
+    }
+    tft.fillScreen(currentScreen == SCREEN_OFF ? TFT_BLACK : dispSettings.bgColor);
     forceRedraw = true;
     if (currentScreen == SCREEN_CONNECTING_MQTT) {
       connectScreenStart = millis();
@@ -436,6 +466,10 @@ void updateDisplay() {
       drawConnectingWiFi();
       break;
 
+    case SCREEN_WIFI_CONNECTED:
+      drawWiFiConnected();
+      break;
+
     case SCREEN_CONNECTING_MQTT:
       drawConnectingMQTT();
       break;
@@ -450,6 +484,13 @@ void updateDisplay() {
 
     case SCREEN_FINISHED:
       drawFinished();
+      break;
+
+    case SCREEN_OFF:
+      if (forceRedraw) {
+        tft.fillScreen(TFT_BLACK);
+        setBacklight(0);
+      }
       break;
   }
 

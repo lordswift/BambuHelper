@@ -54,6 +54,20 @@ void initWiFi() {
   // If we have stored credentials, try STA mode
   if (strlen(wifiSSID) > 0) {
     WiFi.mode(WIFI_STA);
+
+    // Apply static IP if configured
+    if (!netSettings.useDHCP && netSettings.staticIP[0] != '\0') {
+      IPAddress ip, gw, sn, dns;
+      if (ip.fromString(netSettings.staticIP) &&
+          gw.fromString(netSettings.gateway) &&
+          sn.fromString(netSettings.subnet)) {
+        if (netSettings.dns[0] != '\0') dns.fromString(netSettings.dns);
+        else dns = gw;
+        WiFi.config(ip, gw, sn, dns);
+        Serial.printf("Static IP: %s GW: %s\n", netSettings.staticIP, netSettings.gateway);
+      }
+    }
+
     WiFi.begin(wifiSSID, wifiPass);
     setScreenState(SCREEN_CONNECTING_WIFI);
 
@@ -71,6 +85,16 @@ void initWiFi() {
                     WiFi.localIP().toString().c_str());
       apMode = false;
       disconnectTime = 0;
+
+      // Show IP screen for 3 seconds if enabled
+      if (netSettings.showIPAtStartup) {
+        setScreenState(SCREEN_WIFI_CONNECTED);
+        unsigned long ipStart = millis();
+        while (millis() - ipStart < 3000) {
+          updateDisplay();
+          delay(50);
+        }
+      }
       return;
     }
 

@@ -10,10 +10,13 @@ Connects to your printer via MQTT over TLS and displays a real-time dashboard wi
 - **H2-style LED progress bar** — full-width glowing bar inspired by Bambu H2 series
 - **Anti-aliased arc gauges** — smooth nozzle and bed temperature arcs with color zones
 - **Animations** — loading spinner, progress pulse, completion celebration
-- **Web config portal** — dark-themed settings page for WiFi and printer credentials
-- **NVS persistence** — settings survive reboots
+- **Web config portal** — dark-themed settings page for WiFi, network, printer, display, and power settings
+- **Network configuration** — DHCP or static IP, with optional IP display at startup
+- **Display auto-off** — configurable timeout after print completion, auto-off when printer is off
+- **NVS persistence** — all settings survive reboots
 - **Auto AP mode** — creates WiFi hotspot on first boot or when WiFi is lost
 - **Smart redraw** — only redraws changed UI elements for smooth performance
+- **Customizable gauge colors** — per-gauge arc/label/value colors with preset themes
 
 ## Hardware
 
@@ -47,16 +50,73 @@ Adjust pin assignments in `platformio.ini` build_flags to match your wiring.
    - LAN access code (8 characters, from printer Settings > Network)
 5. **Save** — the device restarts and connects to your printer
 
+## Web Interface
+
+The built-in web interface (accessible at the device's IP address) provides the following settings:
+
+### WiFi Settings
+- **SSID** — your home WiFi network name
+- **Password** — WiFi password
+
+### Network
+- **IP Assignment** — choose between DHCP (automatic) or Static IP
+- **Static IP fields** (when static is selected):
+  - IP Address
+  - Gateway
+  - Subnet Mask
+  - DNS Server
+- **Show IP at startup** — display the assigned IP on screen for 3 seconds after WiFi connects (on by default)
+
+### Printer Settings
+- **Enable Monitoring** — toggle printer connection on/off
+- **Printer Name** — friendly name shown on dashboard header
+- **Printer IP Address** — LAN IP of your Bambu printer
+- **Serial Number** — printer serial number
+- **LAN Access Code** — 8-character code from printer network settings
+- **Live Stats** — real-time nozzle/bed temp, progress, fan speed, and connection status
+
+### Display
+- **Brightness** — backlight level (10–255)
+- **Screen Rotation** — 0°, 90°, 180°, 270°
+- **Display off after print complete** — minutes to show the finish screen before turning off the display (0 = never turn off, default: 3 minutes)
+- **Keep display always on** — override the timeout and never turn off
+
+### Gauge Colors
+- **Theme presets** — Default, Mono Green, Neon, Warm, Ocean
+- **Background color** — display background
+- **Track color** — inactive arc background
+- **Per-gauge colors** (arc, label, value) for:
+  - Progress
+  - Nozzle temperature
+  - Bed temperature
+  - Part fan
+  - Aux fan
+  - Chamber fan
+
+### Other
+- **Factory Reset** — erases all settings and restarts
+
 ## Dashboard Screens
 
 | Screen | When |
 |---|---|
+| Splash | Boot (2 seconds) |
 | AP Mode | First boot / no WiFi configured |
 | Connecting WiFi | Attempting WiFi connection |
+| WiFi Connected | Shows IP for 3s (if enabled) |
 | Connecting Printer | WiFi connected, waiting for MQTT |
 | Idle | Connected, printer not printing |
 | Printing | Active print with full dashboard |
-| Finished | Print complete with animation |
+| Finished | Print complete with animation (auto-off after timeout) |
+| Display Off | After finish timeout or printer powered off |
+
+## Display Power Management
+
+- After a print completes, the finish screen is shown for a configurable duration (default: 3 minutes), then the display and backlight turn off to save power.
+- When the printer is powered off or disconnected, the display stays off.
+- When the printer comes back online or starts a new print, the display automatically wakes up.
+- The "Keep display always on" option overrides the auto-off behavior.
+- The web interface shows the current display state (on/off) in the live status section.
 
 ## Project Structure
 
@@ -66,8 +126,8 @@ include/
   bambu_state.h         Data structures (BambuState, PrinterConfig)
 src/
   main.cpp              Setup/loop orchestrator
-  settings.cpp          NVS persistence
-  wifi_manager.cpp      WiFi STA + AP fallback
+  settings.cpp          NVS persistence (WiFi, network, printer, display, power)
+  wifi_manager.cpp      WiFi STA + AP fallback, static IP support
   web_server.cpp        Config portal (HTML embedded)
   bambu_mqtt.cpp        MQTT over TLS, delta merge
   display_ui.cpp        Screen state machine
