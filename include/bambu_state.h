@@ -33,7 +33,6 @@ struct BambuState {
 };
 
 struct PrinterConfig {
-  bool enabled;
   ConnMode mode;              // CONN_LOCAL, CONN_CLOUD, or CONN_CLOUD_ALL
   char ip[16];                // local mode only
   char serial[20];            // both modes

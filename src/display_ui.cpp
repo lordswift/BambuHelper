@@ -1,6 +1,7 @@
 #include "display_ui.h"
 #include "display_gauges.h"
 #include "display_anim.h"
+#include "clock_mode.h"
 #include "icons.h"
 #include "config.h"
 #include "bambu_state.h"
@@ -60,7 +61,7 @@ void initDisplay() {
   tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
   tft.drawString("Printer Monitor", SCREEN_W / 2, SCREEN_H / 2 + 10);
   tft.setTextFont(1);
-  tft.drawString("v1.1", SCREEN_W / 2, SCREEN_H / 2 + 30);
+  tft.drawString("v2.0", SCREEN_W / 2, SCREEN_H / 2 + 30);
 }
 
 void applyDisplaySettings() {
@@ -626,6 +627,10 @@ void updateDisplay() {
 
     case SCREEN_FINISHED:
       drawFinished();
+      break;
+
+    case SCREEN_CLOCK:
+      drawClock();
       break;
 
     case SCREEN_OFF:

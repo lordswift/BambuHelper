@@ -39,6 +39,7 @@ struct NetworkSettings {
 struct DisplayPowerSettings {
   uint16_t finishDisplayMins;  // minutes to show finish screen (0 = keep on)
   bool keepDisplayOn;          // override: never turn off display
+  bool showClockAfterFinish;   // show clock instead of turning display off
 };
 
 extern char wifiSSID[33];

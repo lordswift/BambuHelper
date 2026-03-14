@@ -169,11 +169,6 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
   <div class="section-content" id="sec-printer">
     <div class="section-body">
       <div id="printerStatus" class="%STATUS_CLASS%">%STATUS_TEXT%</div>
-      <div class="check-row">
-        <input type="checkbox" id="enabled" value="1" %ENABLED%>
-        <label for="enabled">Enable Monitoring</label>
-      </div>
-
       <label for="connmode">Connection Mode</label>
       <select id="connmode" onchange="toggleConnMode()">
         <option value="local" %MODE_LOCAL%>LAN Direct (P1/X1/A1)</option>
@@ -253,6 +248,10 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
       <div class="check-row">
         <input type="checkbox" id="keepon" value="1" %KEEPON%>
         <label for="keepon">Keep display always on (override timeout)</label>
+      </div>
+      <div class="check-row">
+        <input type="checkbox" id="clock" value="1" %CLOCK%>
+        <label for="clock">Show clock after print (instead of screen off)</label>
       </div>
 
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
@@ -458,7 +457,6 @@ function savePrinter(){
   var p=new URLSearchParams();
   var mode=document.getElementById('connmode').value;
   p.append('connmode',mode);
-  if(document.getElementById('enabled').checked) p.append('enabled','1');
   if(mode==='cloud_all'){
     p.append('serial',document.getElementById('cl_serial').value);
     p.append('pname',document.getElementById('cl_pname').value);
@@ -550,6 +548,7 @@ function applyDisplay(){
   p.append('rotation',document.getElementById('rotation').value);
   p.append('fmins',document.getElementById('fmins').value);
   if(document.getElementById('keepon').checked) p.append('keepon','1');
+  if(document.getElementById('clock').checked) p.append('clock','1');
   p.append('clr_bg',document.getElementById('clr_bg').value);
   p.append('clr_track',document.getElementById('clr_track').value);
   var g=['prg','noz','bed','pfn','afn','cfn'];
@@ -601,8 +600,8 @@ setInterval(function(){
     }
     document.getElementById('liveStats').innerHTML=h;
     var ps=document.getElementById('printerStatus');
-    var cls=d.connected?'status-ok':(d.enabled?'status-off':'status-na');
-    var txt=d.connected?'Connected':(d.enabled?'Disconnected / Printer Off':'Disabled');
+    var cls=d.connected?'status-ok':'status-off';
+    var txt=d.connected?'Connected':'Disconnected / Printer Off';
     if(d.display_off){cls='status-na';txt+=' (Display Off)';}
     ps.className='status '+cls;
     ps.textContent=txt;
@@ -643,7 +642,6 @@ static String processTemplate(const String& html) {
   String page = html;
   page.replace("%SSID%", wifiSSID);
   page.replace("%PASS%", wifiPass);
-  page.replace("%ENABLED%", cfg.enabled ? "checked" : "");
   page.replace("%MODE_LOCAL%", cfg.mode == CONN_LOCAL ? "selected" : "");
   page.replace("%MODE_CLOUD_ALL%", isCloudMode(cfg.mode) ? "selected" : "");
   page.replace("%PNAME%", cfg.name);
@@ -695,6 +693,7 @@ static String processTemplate(const String& html) {
   // Display power
   page.replace("%FMINS%", String(dpSettings.finishDisplayMins));
   page.replace("%KEEPON%", dpSettings.keepDisplayOn ? "checked" : "");
+  page.replace("%CLOCK%", dpSettings.showClockAfterFinish ? "checked" : "");
 
   // Global colors
   char buf[8];
@@ -713,15 +712,12 @@ static String processTemplate(const String& html) {
 
   page.replace("%DBGLOG%", mqttDebugLog ? "checked" : "");
 
-  if (cfg.enabled && st.connected) {
+  if (st.connected) {
     page.replace("%STATUS_CLASS%", "status status-ok");
     page.replace("%STATUS_TEXT%", "Connected");
-  } else if (cfg.enabled) {
+  } else {
     page.replace("%STATUS_CLASS%", "status status-off");
     page.replace("%STATUS_TEXT%", "Disconnected");
-  } else {
-    page.replace("%STATUS_CLASS%", "status status-na");
-    page.replace("%STATUS_TEXT%", "Disabled");
   }
 
   return page;
@@ -766,6 +762,7 @@ static void readDisplayFromForm() {
     dpSettings.finishDisplayMins = server.arg("fmins").toInt();
   }
   dpSettings.keepDisplayOn = server.hasArg("keepon");
+  dpSettings.showClockAfterFinish = server.hasArg("clock");
 }
 
 // ---------------------------------------------------------------------------
@@ -783,8 +780,6 @@ static void handleRoot() {
 // Save printer settings only (no restart — reinit MQTT)
 static void handleSavePrinter() {
   PrinterConfig& cfg = printers[0].config;
-  cfg.enabled = server.hasArg("enabled");
-
   if (server.hasArg("connmode")) {
     String cm = server.arg("connmode");
     if (cm == "cloud_all") cfg.mode = CONN_CLOUD_ALL;
@@ -863,7 +858,6 @@ static void handleStatus() {
 
   JsonDocument doc;
   doc["connected"] = st.connected;
-  doc["enabled"] = cfg.enabled;
   doc["state"] = st.gcodeState;
   doc["progress"] = st.progress;
   doc["nozzle"] = (int)st.nozzleTemp;

@@ -52,11 +52,12 @@ void loop() {
         setScreenState(SCREEN_IDLE);
         finishScreenStart = 0;
       }
-    } else if (!s.connected && current != SCREEN_CONNECTING_MQTT && current != SCREEN_OFF) {
+    } else if (!s.connected && current != SCREEN_CONNECTING_MQTT &&
+               current != SCREEN_OFF && current != SCREEN_CLOCK) {
       setScreenState(SCREEN_CONNECTING_MQTT);
       finishScreenStart = 0;
-    } else if (!s.connected && current == SCREEN_OFF) {
-      // Stay off when printer is disconnected/off
+    } else if (!s.connected && (current == SCREEN_OFF || current == SCREEN_CLOCK)) {
+      // Stay off/clock when printer is disconnected/off
     } else if (s.connected && s.printing) {
       if (current != SCREEN_PRINTING) {
         setScreenState(SCREEN_PRINTING);
@@ -64,7 +65,7 @@ void loop() {
       }
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") == 0) {
-      if (current != SCREEN_FINISHED && current != SCREEN_OFF) {
+      if (current != SCREEN_FINISHED && current != SCREEN_OFF && current != SCREEN_CLOCK) {
         setScreenState(SCREEN_FINISHED);
         finishScreenStart = millis();
       }
@@ -72,12 +73,12 @@ void loop() {
       if (current == SCREEN_FINISHED && !dpSettings.keepDisplayOn &&
           dpSettings.finishDisplayMins > 0 && finishScreenStart > 0 &&
           millis() - finishScreenStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL) {
-        setScreenState(SCREEN_OFF);
+        setScreenState(dpSettings.showClockAfterFinish ? SCREEN_CLOCK : SCREEN_OFF);
       }
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") != 0) {
-      if (current == SCREEN_OFF) {
-        // Printer woke up from off state — restore display
+      if (current == SCREEN_OFF || current == SCREEN_CLOCK) {
+        // Printer woke up from off/clock state — restore display
         setBacklight(brightness);
       }
       if (current != SCREEN_IDLE) {

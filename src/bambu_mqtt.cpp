@@ -140,7 +140,6 @@ static void reconnect() {
   PrinterConfig& cfg = activePrinter().config;
 
   // Validate config based on mode
-  if (!cfg.enabled) return;
   if (cfg.mode == CONN_LOCAL && strlen(cfg.ip) == 0) return;
   if (isCloudMode(cfg.mode) && (strlen(cfg.cloudUserId) == 0 || strlen(cfg.serial) == 0)) return;
 
@@ -380,8 +379,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void initBambuMqtt() {
   PrinterConfig& cfg = activePrinter().config;
   Serial.println("MQTT: initBambuMqtt()");
-  Serial.printf("MQTT: enabled=%d ip='%s' serial='%s'\n",
-                cfg.enabled, cfg.ip, cfg.serial);
+  Serial.printf("MQTT: ip='%s' serial='%s'\n", cfg.ip, cfg.serial);
 
   memset(&diag, 0, sizeof(diag));
 
@@ -395,7 +393,7 @@ void initBambuMqtt() {
     ? (strlen(cfg.cloudUserId) == 0 || strlen(cfg.serial) == 0)
     : (strlen(cfg.ip) == 0);
 
-  if (!cfg.enabled || notConfigured) {
+  if (notConfigured) {
     Serial.println("MQTT: Printer not configured, skipping");
     releaseClients();
     return;
@@ -410,8 +408,6 @@ void initBambuMqtt() {
 
 void handleBambuMqtt() {
   PrinterConfig& cfg = activePrinter().config;
-  if (!cfg.enabled) return;
-
   BambuState& s = activePrinter().state;
 
   if (!mqttClient || !mqttClient->connected()) {
@@ -468,7 +464,6 @@ void handleBambuMqtt() {
 
 bool isPrinterConfigured() {
   PrinterConfig& cfg = activePrinter().config;
-  if (!cfg.enabled) return false;
   if (isCloudMode(cfg.mode))
     return strlen(cfg.serial) > 0 && strlen(cfg.cloudUserId) > 0;
   return strlen(cfg.ip) > 0;

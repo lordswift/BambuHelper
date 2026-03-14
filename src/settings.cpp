@@ -99,9 +99,6 @@ void loadSettings() {
     char key[16];
     PrinterConfig& cfg = printers[i].config;
 
-    snprintf(key, sizeof(key), "p%d_on", i);
-    cfg.enabled = prefs.getBool(key, false);
-
     snprintf(key, sizeof(key), "p%d_ip", i);
     strlcpy(cfg.ip, prefs.getString(key, "").c_str(), sizeof(cfg.ip));
 
@@ -156,6 +153,7 @@ void loadSettings() {
   // Display power settings
   dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
   dpSettings.keepDisplayOn = prefs.getBool("dp_keepon", false);
+  dpSettings.showClockAfterFinish = prefs.getBool("dp_clock", true);
 
   // Cloud email (display only)
   strlcpy(cloudEmail, prefs.getString("cl_email", "").c_str(), sizeof(cloudEmail));
@@ -202,6 +200,7 @@ void saveSettings() {
   // Display power settings
   prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
   prefs.putBool("dp_keepon", dpSettings.keepDisplayOn);
+  prefs.putBool("dp_clock", dpSettings.showClockAfterFinish);
 
   prefs.end();
 }
@@ -215,9 +214,6 @@ void savePrinterConfig(uint8_t index) {
 
   char key[16];
   PrinterConfig& cfg = printers[index].config;
-
-  snprintf(key, sizeof(key), "p%d_on", index);
-  prefs.putBool(key, cfg.enabled);
 
   snprintf(key, sizeof(key), "p%d_ip", index);
   prefs.putString(key, cfg.ip);
