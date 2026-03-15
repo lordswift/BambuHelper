@@ -58,6 +58,8 @@ Display: 1.54": https://a.aliexpress.com/_EG9y7wc
 
 ESP32-S3 SuperMini: https://a.aliexpress.com/_Eyk9GdA
 
+Optional: TTP223 touch button or standard push button for multi-printer switching (auto printer switching works without button anyway, change settings in web interface)
+
 ### Default Wiring
 
 | Display Pin | ESP32-S3 GPIO |
