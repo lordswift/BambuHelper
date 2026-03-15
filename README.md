@@ -68,8 +68,13 @@ ESP32-S3 SuperMini: https://a.aliexpress.com/_Eyk9GdA
 | DC | 9 |
 | RST | 8 |
 | BL | 13 |
+| GND | GND |
+| VCC | 3.3V |
 
 Adjust pin assignments in `platformio.ini` build_flags to match your wiring.
+
+![wiring](img/wiring.png)
+
 
 ## Flashing
 
