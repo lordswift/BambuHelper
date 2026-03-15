@@ -293,6 +293,11 @@ When the printer comes back online, the backoff resets to normal immediately.
 - WiFi connects sometimes but drops after a few seconds
 - Works fine when display is disconnected
 
+**If WiFi issues persist**
+Perform an antenna mod by soldering two individual goldpins to the antenna pads, as shown in the picture.
+
+![wiring](img/antenamod.png)
+
 ### Printer shows "Connecting" but never connects
 
 - **LAN Direct:** Make sure the printer and ESP32 are on the same network. Check that LAN mode is enabled on the printer and the access code is correct.
