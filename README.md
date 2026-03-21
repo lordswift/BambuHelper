@@ -41,7 +41,7 @@ When using Bambu Cloud, BambuHelper connects through Bambu Lab's cloud MQTT serv
 - **Auto AP mode** - creates WiFi hotspot on first boot or when WiFi is lost
 - **Smart redraw** - only redraws changed UI elements for smooth performance
 - **Customizable gauge colors** - per-gauge arc/label/value colors with preset themes
-- **BETA: [Multi-printer support](firmware/BambuHelper-WebFlasher-v2.1-BETA.bin)** - monitor up to 2 printers simultaneously with auto-rotating display
+- **Multi-printer support** - monitor up to 2 printers simultaneously with auto-rotating display
 - **Smart rotation** - automatically shows the printing printer; cycles between both when both are printing
 - **Physical button** - optional push button or TTP223 touch sensor to cycle printers and wake display
 - **Exponential backoff** - reconnect attempts to offline printers gradually slow down to conserve resources

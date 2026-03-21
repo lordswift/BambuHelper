@@ -18,6 +18,7 @@ struct DisplaySettings {
   uint16_t trackColor;     // inactive arc track color
   bool     animatedBar;    // shimmer effect on progress bar
   bool     pongClock;      // Pong/Breakout animated clock
+  bool     smallLabels;    // use smaller gauge labels (Font 1 instead of Font 2)
   GaugeColors progress;
   GaugeColors nozzle;
   GaugeColors bed;

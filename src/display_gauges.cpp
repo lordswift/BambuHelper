@@ -158,6 +158,56 @@ static void clearGaugeCenter(TFT_eSPI& tft, int16_t cx, int16_t cy,
 }
 
 // ---------------------------------------------------------------------------
+//  Text cache — only clear+redraw gauge text when displayed string changes
+// ---------------------------------------------------------------------------
+#define GAUGE_CACHE_SLOTS 8
+
+struct GaugeTextCache {
+  int16_t cx, cy;
+  char main[12];
+  char sub[12];
+};
+
+static GaugeTextCache gCache[GAUGE_CACHE_SLOTS];
+static uint8_t gCacheCount = 0;
+
+// Find or create cache slot for gauge at (cx, cy)
+static GaugeTextCache* gaugeCache(int16_t cx, int16_t cy) {
+  for (uint8_t i = 0; i < gCacheCount; i++) {
+    if (gCache[i].cx == cx && gCache[i].cy == cy) return &gCache[i];
+  }
+  if (gCacheCount < GAUGE_CACHE_SLOTS) {
+    GaugeTextCache* c = &gCache[gCacheCount++];
+    c->cx = cx; c->cy = cy;
+    c->main[0] = '\0'; c->sub[0] = '\0';
+    return c;
+  }
+  return nullptr;
+}
+
+// Check if text changed; update cache. Returns true if redraw needed.
+static bool gaugeTextChanged(int16_t cx, int16_t cy, const char* main,
+                             const char* sub, bool force) {
+  if (force) {
+    GaugeTextCache* c = gaugeCache(cx, cy);
+    if (c) { strncpy(c->main, main, 11); strncpy(c->sub, sub, 11); }
+    return true;
+  }
+  GaugeTextCache* c = gaugeCache(cx, cy);
+  if (!c) return true;
+  bool changed = (strcmp(c->main, main) != 0) || (strcmp(c->sub, sub) != 0);
+  if (changed) {
+    strncpy(c->main, main, 11); c->main[11] = '\0';
+    strncpy(c->sub, sub, 11); c->sub[11] = '\0';
+  }
+  return changed;
+}
+
+void resetGaugeTextCache() {
+  gCacheCount = 0;
+}
+
+// ---------------------------------------------------------------------------
 //  Main progress arc
 // ---------------------------------------------------------------------------
 void drawProgressArc(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
@@ -171,38 +221,42 @@ void drawProgressArc(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
   if (fillEnd > 300) fillEnd = 300;
 
   drawArcFill(tft, cx, cy, radius, thickness, fillEnd, gc.arc, forceRedraw);
-  clearGaugeCenter(tft, cx, cy, radius, thickness);
 
   bool compact = (radius < 50);
 
-  // Percentage value (no bg color — clearGaugeCenter already filled the circle)
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(gc.value);
-  tft.setTextFont(compact ? 4 : 6);
+  // Build display strings
   char pctBuf[8];
   if (compact) {
     snprintf(pctBuf, sizeof(pctBuf), "%d", progress);
   } else {
     snprintf(pctBuf, sizeof(pctBuf), "%d%%", progress);
   }
-  tft.drawString(pctBuf, cx, cy - (compact ? 4 : 8));
-
-  // Time remaining
-  tft.setTextFont(compact ? 1 : 2);
-  tft.setTextColor(CLR_TEXT_DIM);
   char timeBuf[16];
   if (remainingMin >= 60) {
     snprintf(timeBuf, sizeof(timeBuf), "%dh%dm", remainingMin / 60, remainingMin % 60);
   } else {
     snprintf(timeBuf, sizeof(timeBuf), "%dm", remainingMin);
   }
-  tft.drawString(timeBuf, cx, cy + (compact ? 10 : 18));
 
-  // Label below gauge
-  if (compact) {
-    tft.setTextFont(1);
-    tft.setTextColor(gc.label, bg);
-    tft.drawString("Progress", cx, cy + radius + 6);
+  // Only clear center + redraw text when displayed string actually changes
+  if (gaugeTextChanged(cx, cy, pctBuf, timeBuf, forceRedraw)) {
+    clearGaugeCenter(tft, cx, cy, radius, thickness);
+
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(gc.value);
+    tft.setTextFont(compact ? 4 : 6);
+    tft.drawString(pctBuf, cx, cy - (compact ? 4 : 8));
+
+    tft.setTextFont(compact ? 1 : 2);
+    tft.setTextColor(CLR_TEXT_DIM);
+    tft.drawString(timeBuf, cx, cy + (compact ? 10 : 18));
+
+    if (compact) {
+      bool sm = dispSettings.smallLabels;
+      tft.setTextFont(sm ? 1 : 2);
+      tft.setTextColor(gc.label, bg);
+      tft.drawString("Progress", cx, cy + radius + (sm ? 3 : -1));
+    }
   }
 }
 
@@ -213,7 +267,7 @@ void drawTempGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
                    float current, float target, float maxTemp,
                    uint16_t accentColor, const char* label,
                    const uint8_t* icon, bool forceRedraw,
-                   const GaugeColors* colors) {
+                   const GaugeColors* colors, float arcValue) {
   const uint16_t startAngle = 60;
   const int16_t thickness = 6;
   uint16_t bg = dispSettings.bgColor;
@@ -223,7 +277,9 @@ void drawTempGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
   uint16_t lblColor = colors ? colors->label : accentColor;
   uint16_t valColor = colors ? colors->value : CLR_TEXT;
 
-  float ratio = (maxTemp > 0) ? (current / maxTemp) : 0;
+  // Arc uses smooth value if provided, text always uses actual current
+  float arcVal = (arcValue >= 0.0f) ? arcValue : current;
+  float ratio = (maxTemp > 0) ? (arcVal / maxTemp) : 0;
   if (ratio > 1.0f) ratio = 1.0f;
   if (ratio < 0.0f) ratio = 0.0f;
 
@@ -236,25 +292,30 @@ void drawTempGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
 
   uint16_t drawFill = (ratio > 0.01f) ? fillEnd : startAngle;
   drawArcFill(tft, cx, cy, radius, thickness, drawFill, tempColor, forceRedraw);
-  clearGaugeCenter(tft, cx, cy, radius, thickness);
 
-  // Current temp (no bg color — clearGaugeCenter already filled the circle)
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextFont(4);
-  tft.setTextColor(valColor);
-  char tempBuf[12];
+  // Build display strings
+  char tempBuf[12], targetBuf[12];
   snprintf(tempBuf, sizeof(tempBuf), "%.0f", current);
-  tft.drawString(tempBuf, cx, cy - 4);
+  snprintf(targetBuf, sizeof(targetBuf), "/%.0f", target);
 
-  // Target temp
-  tft.setTextFont(1);
-  tft.setTextColor(CLR_TEXT_DIM);
-  snprintf(tempBuf, sizeof(tempBuf), "/%.0f", target);
-  tft.drawString(tempBuf, cx, cy + 10);
+  // Only clear center + redraw text when displayed string actually changes
+  if (gaugeTextChanged(cx, cy, tempBuf, targetBuf, forceRedraw)) {
+    clearGaugeCenter(tft, cx, cy, radius, thickness);
 
-  // Label below gauge
-  tft.setTextColor(lblColor, bg);
-  tft.drawString(label, cx, cy + radius + 6);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(4);
+    tft.setTextColor(valColor);
+    tft.drawString(tempBuf, cx, cy - 4);
+
+    tft.setTextFont(1);
+    tft.setTextColor(CLR_TEXT_DIM);
+    tft.drawString(targetBuf, cx, cy + 10);
+
+    bool sm = dispSettings.smallLabels;
+    tft.setTextFont(sm ? 1 : 2);
+    tft.setTextColor(lblColor, bg);
+    tft.drawString(label, cx, cy + radius + (sm ? 3 : -1));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +323,8 @@ void drawTempGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
 // ---------------------------------------------------------------------------
 void drawFanGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
                   uint8_t percent, uint16_t accentColor, const char* label,
-                  bool forceRedraw, const GaugeColors* colors) {
+                  bool forceRedraw, const GaugeColors* colors,
+                  float arcPercent) {
   const uint16_t startAngle = 60;
   const int16_t thickness = 6;
   uint16_t bg = dispSettings.bgColor;
@@ -271,30 +333,37 @@ void drawFanGauge(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t radius,
   uint16_t lblColor = colors ? colors->label : accentColor;
   uint16_t valColor = colors ? colors->value : CLR_TEXT;
 
-  uint16_t fillEnd = startAngle + (percent * 240) / 100;
+  // Arc uses smooth value if provided, text always uses actual percent
+  float arcVal = (arcPercent >= 0.0f) ? arcPercent : (float)percent;
+  uint16_t fillEnd = startAngle + (uint16_t)(arcVal * 240.0f / 100.0f);
   if (fillEnd > 300) fillEnd = 300;
 
   uint16_t fanColor;
-  if (percent == 0) {
+  if (percent == 0 && arcVal < 0.5f) {
     fanColor = CLR_TEXT_DIM;
   } else {
     fanColor = arcColor;
   }
 
-  uint16_t drawFill = (percent > 0) ? fillEnd : startAngle;
+  uint16_t drawFill = (arcVal > 0.5f) ? fillEnd : startAngle;
   drawArcFill(tft, cx, cy, radius, thickness, drawFill, fanColor, forceRedraw);
-  clearGaugeCenter(tft, cx, cy, radius, thickness);
 
-  // Percentage value (no bg color — clearGaugeCenter already filled the circle)
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextFont(4);
-  tft.setTextColor(valColor);
+  // Build display string
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", percent);
-  tft.drawString(buf, cx, cy);
 
-  // Label below gauge
-  tft.setTextFont(1);
-  tft.setTextColor(lblColor, bg);
-  tft.drawString(label, cx, cy + radius + 6);
+  // Only clear center + redraw text when displayed value actually changes
+  if (gaugeTextChanged(cx, cy, buf, "", forceRedraw)) {
+    clearGaugeCenter(tft, cx, cy, radius, thickness);
+
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(4);
+    tft.setTextColor(valColor);
+    tft.drawString(buf, cx, cy);
+
+    bool sm = dispSettings.smallLabels;
+    tft.setTextFont(sm ? 1 : 2);
+    tft.setTextColor(lblColor, bg);
+    tft.drawString(label, cx, cy + radius + (sm ? 3 : -1));
+  }
 }

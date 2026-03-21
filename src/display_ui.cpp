@@ -27,6 +27,49 @@ static BambuState prevState;
 static unsigned long connectScreenStart = 0;
 
 // ---------------------------------------------------------------------------
+//  Smooth gauge interpolation — values lerp toward MQTT actuals each frame
+// ---------------------------------------------------------------------------
+static float smoothNozzleTemp = 0;
+static float smoothBedTemp    = 0;
+static float smoothPartFan    = 0;
+static float smoothAuxFan     = 0;
+static float smoothChamberFan = 0;
+static bool  smoothInited     = false;
+
+static const float SMOOTH_ALPHA = 0.25f;  // per frame at 4Hz — ~1s to settle
+static const float SNAP_THRESH  = 0.5f;   // snap when within 0.5 of target
+
+static void smoothLerp(float& cur, float target) {
+  float diff = target - cur;
+  if (fabsf(diff) < SNAP_THRESH) cur = target;
+  else cur += diff * SMOOTH_ALPHA;
+}
+
+// Returns true if any gauge is still animating
+static bool tickGaugeSmooth(const BambuState& s, bool snap) {
+  if (snap || !smoothInited) {
+    smoothNozzleTemp = s.nozzleTemp;
+    smoothBedTemp    = s.bedTemp;
+    smoothPartFan    = s.coolingFanPct;
+    smoothAuxFan     = s.auxFanPct;
+    smoothChamberFan = s.chamberFanPct;
+    smoothInited = true;
+    return false;
+  }
+  smoothLerp(smoothNozzleTemp, s.nozzleTemp);
+  smoothLerp(smoothBedTemp,    s.bedTemp);
+  smoothLerp(smoothPartFan,    (float)s.coolingFanPct);
+  smoothLerp(smoothAuxFan,     (float)s.auxFanPct);
+  smoothLerp(smoothChamberFan, (float)s.chamberFanPct);
+
+  return (smoothNozzleTemp != s.nozzleTemp) ||
+         (smoothBedTemp    != s.bedTemp) ||
+         (smoothPartFan    != (float)s.coolingFanPct) ||
+         (smoothAuxFan     != (float)s.auxFanPct) ||
+         (smoothChamberFan != (float)s.chamberFanPct);
+}
+
+// ---------------------------------------------------------------------------
 //  Backlight
 // ---------------------------------------------------------------------------
 void setBacklight(uint8_t level) {
@@ -78,6 +121,8 @@ void applyDisplaySettings() {
 void triggerDisplayTransition() {
   // Clear previous state so everything redraws for the new printer
   memset(&prevState, 0, sizeof(prevState));
+  smoothInited = false;  // snap gauges to new printer's values
+  resetGaugeTextCache();
   tft.fillScreen(dispSettings.bgColor);
   forceRedraw = true;
 }
@@ -329,8 +374,9 @@ static void drawIdle() {
   PrinterSlot& p = displayedPrinter();
   BambuState& s = p.state;
 
+  bool animating = tickGaugeSmooth(s, forceRedraw);
   bool stateChanged = forceRedraw || (strcmp(s.gcodeState, prevState.gcodeState) != 0);
-  bool tempChanged = forceRedraw ||
+  bool tempChanged = forceRedraw || animating ||
                      (s.nozzleTemp != prevState.nozzleTemp) ||
                      (s.nozzleTarget != prevState.nozzleTarget) ||
                      (s.bedTemp != prevState.bedTemp) ||
@@ -377,13 +423,13 @@ static void drawIdle() {
     drawTempGauge(tft, SCREEN_W / 2 - 55, 140, 30,
                   s.nozzleTemp, s.nozzleTarget, 300.0f,
                   dispSettings.nozzle.arc, nozzleLabel(s), nullptr, forceRedraw,
-                  &dispSettings.nozzle);
+                  &dispSettings.nozzle, smoothNozzleTemp);
 
     // Bed temp gauge
     drawTempGauge(tft, SCREEN_W / 2 + 55, 140, 30,
                   s.bedTemp, s.bedTarget, 120.0f,
                   dispSettings.bed.arc, "Bed", nullptr, forceRedraw,
-                  &dispSettings.bed);
+                  &dispSettings.bed, smoothBedTemp);
   }
 
   // Bottom: filament indicator or WiFi signal
@@ -417,15 +463,16 @@ static void drawPrinting() {
   PrinterSlot& p = displayedPrinter();
   BambuState& s = p.state;
 
+  bool animating = tickGaugeSmooth(s, forceRedraw);
   bool progChanged = forceRedraw || (s.progress != prevState.progress);
-  bool tempChanged = forceRedraw ||
+  bool tempChanged = forceRedraw || animating ||
                      (s.nozzleTemp != prevState.nozzleTemp) ||
                      (s.nozzleTarget != prevState.nozzleTarget) ||
                      (s.bedTemp != prevState.bedTemp) ||
                      (s.bedTarget != prevState.bedTarget);
   bool etaChanged = forceRedraw ||
                      (s.remainingMinutes != prevState.remainingMinutes);
-  bool fansChanged = forceRedraw ||
+  bool fansChanged = forceRedraw || animating ||
                      (s.coolingFanPct != prevState.coolingFanPct) ||
                      (s.auxFanPct != prevState.auxFanPct) ||
                      (s.chamberFanPct != prevState.chamberFanPct);
@@ -493,12 +540,12 @@ static void drawPrinting() {
     drawTempGauge(tft, col2, row1Y, gR,
                   s.nozzleTemp, s.nozzleTarget, 300.0f,
                   dispSettings.nozzle.arc, nozzleLabel(s), nullptr, forceRedraw,
-                  &dispSettings.nozzle);
+                  &dispSettings.nozzle, smoothNozzleTemp);
 
     drawTempGauge(tft, col3, row1Y, gR,
                   s.bedTemp, s.bedTarget, 120.0f,
                   dispSettings.bed.arc, "Bed", nullptr, forceRedraw,
-                  &dispSettings.bed);
+                  &dispSettings.bed, smoothBedTemp);
   }
 
   // === Row 2: Part Fan | Aux Fan | Chamber Fan (y=106-176) ===
@@ -506,15 +553,15 @@ static void drawPrinting() {
   if (fansChanged) {
     drawFanGauge(tft, col1, row2Y, gR,
                  s.coolingFanPct, dispSettings.partFan.arc, "Part", forceRedraw,
-                 &dispSettings.partFan);
+                 &dispSettings.partFan, smoothPartFan);
 
     drawFanGauge(tft, col2, row2Y, gR,
                  s.auxFanPct, dispSettings.auxFan.arc, "Aux", forceRedraw,
-                 &dispSettings.auxFan);
+                 &dispSettings.auxFan, smoothAuxFan);
 
     drawFanGauge(tft, col3, row2Y, gR,
                  s.chamberFanPct, dispSettings.chamberFan.arc, "Chamber", forceRedraw,
-                 &dispSettings.chamberFan);
+                 &dispSettings.chamberFan, smoothChamberFan);
   }
 
   // === Info line — ETA finish time or PAUSE/ERROR alert (below row 2 labels) ===
@@ -590,12 +637,15 @@ static void drawPrinting() {
   }
 
   // === Bottom status bar — Filament/WiFi | Layer | Speed (y=222-240) ===
+  // WiFi signal only matters when AMS indicator is not shown
+  bool showingWifi = !(s.ams.present && s.ams.activeTray < AMS_MAX_TRAYS && s.ams.trays[s.ams.activeTray].present)
+                  && !(s.ams.vtPresent && s.ams.activeTray == 254);
   bool bottomChanged = forceRedraw ||
-                       (s.wifiSignal != prevState.wifiSignal) ||
                        (s.speedLevel != prevState.speedLevel) ||
                        (s.layerNum != prevState.layerNum) ||
                        (s.totalLayers != prevState.totalLayers) ||
-                       (s.ams.activeTray != prevState.ams.activeTray);
+                       (s.ams.activeTray != prevState.ams.activeTray) ||
+                       (showingWifi && s.wifiSignal != prevState.wifiSignal);
   if (bottomChanged) {
     tft.fillRect(0, 222, SCREEN_W, 18, CLR_BG);
     tft.setTextFont(2);
@@ -648,7 +698,8 @@ static void drawFinished() {
   PrinterSlot& p = displayedPrinter();
   BambuState& s = p.state;
 
-  bool tempChanged = forceRedraw ||
+  bool animating = tickGaugeSmooth(s, forceRedraw);
+  bool tempChanged = forceRedraw || animating ||
                      (s.nozzleTemp != prevState.nozzleTemp) ||
                      (s.nozzleTarget != prevState.nozzleTarget) ||
                      (s.bedTemp != prevState.bedTemp) ||
@@ -698,12 +749,12 @@ static void drawFinished() {
     drawTempGauge(tft, gaugeLeft, gaugeY, gR,
                   s.nozzleTemp, s.nozzleTarget, 300.0f,
                   dispSettings.nozzle.arc, nozzleLabel(s), nullptr, forceRedraw,
-                  &dispSettings.nozzle);
+                  &dispSettings.nozzle, smoothNozzleTemp);
 
     drawTempGauge(tft, gaugeRight, gaugeY, gR,
                   s.bedTemp, s.bedTarget, 120.0f,
                   dispSettings.bed.arc, "Bed", nullptr, forceRedraw,
-                  &dispSettings.bed);
+                  &dispSettings.bed, smoothBedTemp);
   }
 
   // === "Print Complete!" status ===

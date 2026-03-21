@@ -271,6 +271,10 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         <input type="checkbox" id="pong" value="1" %PONG%>
         <label for="pong">Pong clock (animated Breakout game as clock screen)</label>
       </div>
+      <div class="check-row">
+        <input type="checkbox" id="slbl" value="1" %SLBL%>
+        <label for="slbl">Smaller gauge labels</label>
+      </div>
       <div style="font-size:11px;color:#8B949E;margin-top:4px">
         Note: Without a physical button, display will show clock instead of turning off (no way to wake manually).
       </div>
@@ -699,6 +703,7 @@ function applyDisplay(){
   if(document.getElementById('clock').checked) p.append('clock','1');
   if(document.getElementById('abar').checked) p.append('abar','1');
   if(document.getElementById('pong').checked) p.append('pong','1');
+  if(document.getElementById('slbl').checked) p.append('slbl','1');
   p.append('tz',document.getElementById('tz').value);
   if(document.getElementById('use24h').checked) p.append('use24h','1');
   p.append('clr_bg',document.getElementById('clr_bg').value);
@@ -894,6 +899,7 @@ static String processTemplate(const String& html) {
   page.replace("%CLOCK%", dpSettings.showClockAfterFinish ? "checked" : "");
   page.replace("%ABAR%", dispSettings.animatedBar ? "checked" : "");
   page.replace("%PONG%", dispSettings.pongClock ? "checked" : "");
+  page.replace("%SLBL%", dispSettings.smallLabels ? "checked" : "");
 
   // Global colors
   char buf[8];
@@ -987,6 +993,7 @@ static void readDisplayFromForm() {
   dpSettings.showClockAfterFinish = server.hasArg("clock");
   dispSettings.animatedBar = server.hasArg("abar");
   dispSettings.pongClock = server.hasArg("pong");
+  dispSettings.smallLabels = server.hasArg("slbl");
 
   // Clock settings (timezone, 24h)
   if (server.hasArg("tz")) {
@@ -1312,6 +1319,7 @@ static void handleSettingsExport() {
   rgb565ToHtml(dispSettings.trackColor, buf); disp["trackColor"] = String(buf);
   disp["animatedBar"] = dispSettings.animatedBar;
   disp["pongClock"] = dispSettings.pongClock;
+  disp["smallLabels"] = dispSettings.smallLabels;
 
   JsonObject gauges = disp["gauges"].to<JsonObject>();
   JsonObject gPrg = gauges["progress"].to<JsonObject>(); gaugeColorsToJson(gPrg, dispSettings.progress);
@@ -1431,6 +1439,7 @@ static void handleSettingsImportFinish() {
     if (disp["trackColor"].is<const char*>()) dispSettings.trackColor = htmlToRgb565(disp["trackColor"]);
     if (disp["animatedBar"].is<bool>())       dispSettings.animatedBar = disp["animatedBar"].as<bool>();
     if (disp["pongClock"].is<bool>())         dispSettings.pongClock = disp["pongClock"].as<bool>();
+    if (disp["smallLabels"].is<bool>())      dispSettings.smallLabels = disp["smallLabels"].as<bool>();
 
     JsonObject gauges = disp["gauges"];
     if (gauges) {
