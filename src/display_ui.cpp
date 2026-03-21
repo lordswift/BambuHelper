@@ -522,10 +522,16 @@ static void drawPrinting() {
       tft.setTextColor(CLR_RED, CLR_BG);
       tft.drawString("ERROR!", SCREEN_W / 2, 207);
     } else if (s.remainingMinutes > 0) {
+      // Use time() directly - avoids getLocalTime() race condition with timeout 0.
+      // Once NTP syncs the RTC keeps running; ntpSynced latches true forever.
+      static bool ntpSynced = false;
+      time_t nowEpoch = time(nullptr);
       struct tm now;
-      if (getLocalTime(&now, 0)) {
+      localtime_r(&nowEpoch, &now);
+      if (now.tm_year > (2020 - 1900)) ntpSynced = true;
+
+      if (ntpSynced) {
         // Calculate ETA: current time + remaining minutes
-        time_t nowEpoch = mktime(&now);
         time_t etaEpoch = nowEpoch + (time_t)s.remainingMinutes * 60;
         struct tm etaTm;
         localtime_r(&etaEpoch, &etaTm);
@@ -556,7 +562,7 @@ static void drawPrinting() {
         tft.setTextColor(CLR_GREEN, CLR_BG);
         tft.drawString(etaBuf, SCREEN_W / 2, 207);
       } else {
-        // NTP not synced yet — show remaining time only
+        // NTP not synced yet - show remaining time only
         char remBuf[24];
         uint16_t h = s.remainingMinutes / 60;
         uint16_t m = s.remainingMinutes % 60;
