@@ -11,6 +11,7 @@
 #include "timezones.h"
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <Update.h>
 
 static WebServer server(80);
 
@@ -462,6 +463,25 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         </div>
       </div>
       <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
+        <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Firmware Update</h3>
+        <p style="font-size:13px;color:#8B949E;margin-bottom:4px">
+          Current version: <b style="color:#58A6FF">%FW_VER%</b>
+        </p>
+        <p style="font-size:11px;color:#8B949E;margin-bottom:10px">
+          Upload a .bin file. Settings are preserved. Device restarts automatically.
+        </p>
+        <input type="file" id="otaFile" accept=".bin"
+               style="width:100%;padding:6px;background:#0D1117;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+        <div id="otaProgress" style="display:none;margin-top:12px">
+          <div style="background:#30363D;border-radius:4px;height:20px;overflow:hidden">
+            <div id="otaBar" style="background:#238636;height:100%;width:0%;transition:width 0.3s;border-radius:4px"></div>
+          </div>
+          <div id="otaPct" style="text-align:center;font-size:13px;color:#E6EDF3;margin-top:4px">0%</div>
+        </div>
+        <div id="otaStatus" style="margin-top:8px;font-size:13px"></div>
+        <button type="button" class="btn btn-primary" style="margin-top:8px" onclick="startOta()">Upload &amp; Update</button>
+      </div>
+      <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
         <button type="button" class="btn btn-danger" onclick="if(confirm('Reset all settings to factory defaults?'))location='/reset'">Factory Reset</button>
       </div>
     </div>
@@ -806,6 +826,52 @@ function importSettings(){
     });
 }
 
+function startOta(){
+  var f=document.getElementById('otaFile').files[0];
+  if(!f){showToast('Select a .bin file first');return;}
+  if(!f.name.endsWith('.bin')){showToast('File must be .bin');return;}
+  if(f.size<32768){showToast('File too small');return;}
+  if(f.size>1310720){showToast('File too large (max 1.25MB)');return;}
+  if(!confirm('Upload firmware and restart?')) return;
+  var prog=document.getElementById('otaProgress');
+  var bar=document.getElementById('otaBar');
+  var pct=document.getElementById('otaPct');
+  var stat=document.getElementById('otaStatus');
+  prog.style.display='block';
+  bar.style.width='0%';
+  pct.textContent='0%';
+  stat.innerHTML='<span style="color:#58A6FF">Uploading...</span>';
+  var fd=new FormData();
+  fd.append('firmware',f);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/ota/upload',true);
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var p=Math.round(e.loaded/e.total*100);
+      bar.style.width=p+'%';
+      pct.textContent=p+'%';
+      if(p>=100) stat.innerHTML='<span style="color:#58A6FF">Flashing...</span>';
+    }
+  };
+  xhr.onload=function(){
+    try{
+      var d=JSON.parse(xhr.responseText);
+      if(d.status==='ok'){
+        bar.style.width='100%';pct.textContent='100%';
+        stat.innerHTML='<span style="color:#3FB950">'+d.message+'</span>';
+      } else {
+        stat.innerHTML='<span style="color:#F85149">Error: '+d.message+'</span>';
+      }
+    }catch(e){
+      stat.innerHTML='<span style="color:#F85149">Unexpected response</span>';
+    }
+  };
+  xhr.onerror=function(){
+    stat.innerHTML='<span style="color:#F85149">Upload failed (connection lost)</span>';
+  };
+  xhr.send(fd);
+}
+
 // Pong clock checkbox depends on clock-after-print being enabled
 (function(){
   var clk=document.getElementById('clock');
@@ -930,6 +996,7 @@ static String processTemplate(const String& html) {
   replaceGaugeColors(page, "CFN", dispSettings.chamberFan);
 
   page.replace("%DBGLOG%", mqttDebugLog ? "checked" : "");
+  page.replace("%FW_VER%", FW_VERSION);
 
   if (st.connected) {
     page.replace("%STATUS_CLASS%", "status status-ok");
@@ -1387,6 +1454,8 @@ static void handleSettingsExport() {
 //  Settings import (JSON upload)
 // ---------------------------------------------------------------------------
 static String settingsImportBuf;
+static bool   otaInProgress = false;
+static String otaError      = "";
 
 static void gaugeColorsFromJson(JsonObject obj, GaugeColors& gc) {
   if (obj["arc"].is<const char*>())   gc.arc   = htmlToRgb565(obj["arc"]);
@@ -1527,6 +1596,73 @@ static void handleSettingsImportFinish() {
   ESP.restart();
 }
 
+// ---------------------------------------------------------------------------
+//  OTA firmware update
+// ---------------------------------------------------------------------------
+static void handleOtaUpload() {
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    otaError = "";
+    otaInProgress = true;
+    Serial.printf("OTA: start, file=%s\n", upload.filename.c_str());
+
+    disconnectBambuMqtt();
+
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      otaError = Update.errorString();
+      Serial.printf("OTA: begin failed: %s\n", otaError.c_str());
+      otaInProgress = false;
+    }
+
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!otaInProgress) return;
+
+    // Validate ESP32 magic byte on first chunk
+    if (Update.progress() == 0 && upload.currentSize > 0 && upload.buf[0] != 0xE9) {
+      otaError = "Invalid firmware file";
+      Update.abort();
+      otaInProgress = false;
+      return;
+    }
+
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      otaError = Update.errorString();
+      Update.abort();
+      otaInProgress = false;
+    }
+
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (!otaInProgress) return;
+
+    if (Update.end(true)) {
+      Serial.printf("OTA: success, %u bytes\n", upload.totalSize);
+    } else {
+      otaError = Update.errorString();
+      Serial.printf("OTA: end failed: %s\n", otaError.c_str());
+    }
+    otaInProgress = false;
+
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    otaInProgress = false;
+    Serial.println("OTA: aborted");
+  }
+}
+
+static void handleOtaFinish() {
+  if (otaError.length() > 0) {
+    String msg = "{\"status\":\"error\",\"message\":\"" + otaError + "\"}";
+    server.send(400, "application/json", msg);
+    otaError = "";
+    return;
+  }
+  server.send(200, "application/json",
+    "{\"status\":\"ok\",\"message\":\"Update successful. Restarting...\"}");
+  delay(1500);
+  ESP.restart();
+}
+
 // Captive portal: redirect any unknown request to root
 static void handleNotFound() {
   if (isAPMode()) {
@@ -1555,6 +1691,7 @@ void initWebServer() {
   server.on("/cloud/logout", HTTP_POST, handleCloudLogout);
   server.on("/settings/export", HTTP_GET, handleSettingsExport);
   server.on("/settings/import", HTTP_POST, handleSettingsImportFinish, handleSettingsImportUpload);
+  server.on("/ota/upload", HTTP_POST, handleOtaFinish, handleOtaUpload);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started on port 80");
