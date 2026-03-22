@@ -1093,6 +1093,7 @@ static void readDisplayFromForm() {
 // ---------------------------------------------------------------------------
 static void handleRoot() {
   if (isAPMode()) {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.send(200, "text/html", FPSTR(PAGE_AP_HTML));
   } else {
     String html = FPSTR(PAGE_HTML);
@@ -1669,8 +1670,12 @@ static void handleOtaFinish() {
 }
 
 // Captive portal: redirect any unknown request to root
+// Android/Samsung check /generate_204 expecting 204 — returning 302 triggers popup.
+// Apple checks /hotspot-detect.html — non-"Success" body triggers popup.
+// Using 302 + no-cache for all unknown paths ensures popup on all platforms.
 static void handleNotFound() {
   if (isAPMode()) {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.sendHeader("Location", "http://192.168.4.1/");
     server.send(302, "text/plain", "");
   } else {
@@ -1681,7 +1686,20 @@ static void handleNotFound() {
 // ---------------------------------------------------------------------------
 //  Init & handle
 // ---------------------------------------------------------------------------
+static void handleCaptiveDetect() {
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Location", "http://192.168.4.1/");
+  server.send(302, "text/plain", "");
+}
+
 void initWebServer() {
+  // Captive portal detection endpoints (must be before onNotFound)
+  server.on("/generate_204", HTTP_GET, handleCaptiveDetect);        // Android/Samsung
+  server.on("/gen_204", HTTP_GET, handleCaptiveDetect);              // Android alt
+  server.on("/connecttest.txt", HTTP_GET, handleCaptiveDetect);      // Windows
+  server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveDetect);  // Apple
+  server.on("/canonical.html", HTTP_GET, handleCaptiveDetect);       // Firefox
+
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save/wifi", HTTP_POST, handleSaveWifi);
   server.on("/save/printer", HTTP_POST, handleSavePrinter);
