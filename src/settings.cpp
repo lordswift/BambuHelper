@@ -211,6 +211,7 @@ void loadSettings() {
   dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
   dpSettings.keepDisplayOn = prefs.getBool("dp_keepon", false);
   dpSettings.showClockAfterFinish = prefs.getBool("dp_clock", true);
+  dpSettings.doorAckEnabled = prefs.getBool("dp_dack", false);
   dpSettings.nightModeEnabled = prefs.getBool("dp_night", false);
   dpSettings.nightStartHour = prefs.getUChar("dp_nstart", 22);
   dpSettings.nightEndHour = prefs.getUChar("dp_nend", 7);
@@ -289,6 +290,7 @@ void saveSettings() {
   prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
   prefs.putBool("dp_keepon", dpSettings.keepDisplayOn);
   prefs.putBool("dp_clock", dpSettings.showClockAfterFinish);
+  prefs.putBool("dp_dack", dpSettings.doorAckEnabled);
   prefs.putBool("dp_night", dpSettings.nightModeEnabled);
   prefs.putUChar("dp_nstart", dpSettings.nightStartHour);
   prefs.putUChar("dp_nend", dpSettings.nightEndHour);

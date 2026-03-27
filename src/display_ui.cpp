@@ -25,6 +25,7 @@ static unsigned long lastDisplayUpdate = 0;
 
 // Previous state for smart redraw
 static BambuState prevState;
+static bool prevWaitingForDoor = false;
 static unsigned long connectScreenStart = 0;
 
 // ---------------------------------------------------------------------------
@@ -978,15 +979,22 @@ static void drawFinished() {
     }
   }
 
-  // === Bottom status bar — WiFi ===
-  if (forceRedraw) {
+  // === Bottom status bar ===
+  bool waitingForDoor = dpSettings.doorAckEnabled && s.doorSensorPresent && !s.doorAcknowledged;
+  if (forceRedraw || (waitingForDoor != prevWaitingForDoor)) {
+    prevWaitingForDoor = waitingForDoor;
     tft.fillRect(0, LY_FIN_BOT_Y, SCREEN_W, LY_FIN_BOT_H, CLR_BG);
     tft.setTextFont(1);
     tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
-    char wifiBuf[20];
-    snprintf(wifiBuf, sizeof(wifiBuf), "WiFi: %d dBm", s.wifiSignal);
-    tft.drawString(wifiBuf, SCREEN_W / 2, LY_FIN_WIFI_Y);
+    if (waitingForDoor) {
+      tft.setTextColor(CLR_ORANGE, CLR_BG);
+      tft.drawString("Open door to dismiss", SCREEN_W / 2, LY_FIN_WIFI_Y);
+    } else {
+      tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
+      char wifiBuf[20];
+      snprintf(wifiBuf, sizeof(wifiBuf), "WiFi: %d dBm", s.wifiSignal);
+      tft.drawString(wifiBuf, SCREEN_W / 2, LY_FIN_WIFI_Y);
+    }
   }
 }
 

@@ -288,6 +288,10 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         <label for="clock">Show clock after print (instead of screen off)</label>
       </div>
       <div class="check-row">
+        <input type="checkbox" id="dack" value="1" %DACK%>
+        <label for="dack">Wait for door open after print (acknowledge print removal)</label>
+      </div>
+      <div class="check-row">
         <input type="checkbox" id="abar" value="1" %ABAR%>
         <label for="abar">Animated progress bar (shimmer effect)</label>
       </div>
@@ -752,6 +756,7 @@ function applyDisplay(){
   p.append('fmins',document.getElementById('fmins').value);
   if(document.getElementById('keepon').checked) p.append('keepon','1');
   if(document.getElementById('clock').checked) p.append('clock','1');
+  if(document.getElementById('dack').checked) p.append('dack','1');
   if(document.getElementById('abar').checked) p.append('abar','1');
   if(document.getElementById('pong').checked) p.append('pong','1');
   if(document.getElementById('slbl').checked) p.append('slbl','1');
@@ -1026,6 +1031,7 @@ static String processTemplate(const String& html) {
   page.replace("%FMINS%", String(dpSettings.finishDisplayMins));
   page.replace("%KEEPON%", dpSettings.keepDisplayOn ? "checked" : "");
   page.replace("%CLOCK%", dpSettings.showClockAfterFinish ? "checked" : "");
+  page.replace("%DACK%", dpSettings.doorAckEnabled ? "checked" : "");
   page.replace("%ABAR%", dispSettings.animatedBar ? "checked" : "");
   page.replace("%PONG%", dispSettings.pongClock ? "checked" : "");
   page.replace("%SLBL%", dispSettings.smallLabels ? "checked" : "");
@@ -1128,6 +1134,7 @@ static void readDisplayFromForm() {
   }
   dpSettings.keepDisplayOn = server.hasArg("keepon");
   dpSettings.showClockAfterFinish = server.hasArg("clock");
+  dpSettings.doorAckEnabled = server.hasArg("dack");
   dispSettings.animatedBar = server.hasArg("abar");
   dispSettings.pongClock = server.hasArg("pong");
   dispSettings.smallLabels = server.hasArg("slbl");
@@ -1482,6 +1489,7 @@ static void handleSettingsExport() {
   dp["finishDisplayMins"] = dpSettings.finishDisplayMins;
   dp["keepDisplayOn"] = dpSettings.keepDisplayOn;
   dp["showClockAfterFinish"] = dpSettings.showClockAfterFinish;
+  dp["doorAckEnabled"] = dpSettings.doorAckEnabled;
   dp["nightModeEnabled"] = dpSettings.nightModeEnabled;
   dp["nightStartHour"] = dpSettings.nightStartHour;
   dp["nightEndHour"] = dpSettings.nightEndHour;
@@ -1613,6 +1621,7 @@ static void handleSettingsImportFinish() {
     if (dp["finishDisplayMins"].is<uint16_t>()) dpSettings.finishDisplayMins = dp["finishDisplayMins"].as<uint16_t>();
     if (dp["keepDisplayOn"].is<bool>())         dpSettings.keepDisplayOn = dp["keepDisplayOn"].as<bool>();
     if (dp["showClockAfterFinish"].is<bool>())  dpSettings.showClockAfterFinish = dp["showClockAfterFinish"].as<bool>();
+    if (dp["doorAckEnabled"].is<bool>())        dpSettings.doorAckEnabled = dp["doorAckEnabled"].as<bool>();
     if (dp["nightModeEnabled"].is<bool>())      dpSettings.nightModeEnabled = dp["nightModeEnabled"].as<bool>();
     if (dp["nightStartHour"].is<uint8_t>())     dpSettings.nightStartHour = dp["nightStartHour"].as<uint8_t>();
     if (dp["nightEndHour"].is<uint8_t>())       dpSettings.nightEndHour = dp["nightEndHour"].as<uint8_t>();

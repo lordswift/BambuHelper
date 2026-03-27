@@ -192,6 +192,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
   pf["heatbreak_fan_speed"] = true;
   pf["wifi_signal"] = true;
   pf["spd_lvl"] = true;
+  pf["stat"] = true;  // H2 door sensor (hex string, bit 0x00800000 = door open)
   // Note: H2D/H2C extruder data is parsed separately from raw payload (see below)
 
   JsonDocument doc;
@@ -463,6 +464,16 @@ static void parseMqttPayload(byte* payload, unsigned int length,
 
   if (print["spd_lvl"].is<int>())
     s.speedLevel = print["spd_lvl"].as<int>();
+
+  // Door sensor (H2 series): stat is hex string, bit 0x00800000 = door open
+  if (print["stat"].is<const char*>()) {
+    uint32_t statVal = strtoul(print["stat"].as<const char*>(), nullptr, 16);
+    s.doorOpen = (statVal & 0x00800000) != 0;
+    if (!s.doorSensorPresent) {
+      s.doorSensorPresent = true;
+      MQTT_LOG("door sensor detected (stat=0x%08X, door=%s)", statVal, s.doorOpen ? "OPEN" : "CLOSED");
+    }
+  }
 
   s.lastUpdate = millis();
 }

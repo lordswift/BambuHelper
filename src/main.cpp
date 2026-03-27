@@ -171,6 +171,7 @@ void loop() {
         finishScreenStart = 0;
       }
       s.finishBuzzerPlayed = false;  // reset for next finish event
+      s.doorAcknowledged = false;    // reset door ack for next finish
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") == 0) {
       if (current != SCREEN_FINISHED && current != SCREEN_OFF && current != SCREEN_CLOCK) {
@@ -181,8 +182,20 @@ void loop() {
           s.finishBuzzerPlayed = true;
         }
       }
+
+      // Door acknowledge: wait for door open before starting timeout
+      bool waitingForDoor = dpSettings.doorAckEnabled && s.doorSensorPresent
+                            && !s.doorAcknowledged;
+      if (waitingForDoor && s.doorOpen) {
+        s.doorAcknowledged = true;
+        finishScreenStart = millis();  // restart timeout from door open moment
+        Serial.println("Door opened - print removal acknowledged, starting timeout");
+      }
+
       // Only turn off/clock after timeout if NO printer is still printing
+      // If door ack is enabled and door not yet opened, block the timeout
       if (current == SCREEN_FINISHED && !dpSettings.keepDisplayOn &&
+          !waitingForDoor &&
           dpSettings.finishDisplayMins > 0 && finishScreenStart > 0 &&
           millis() - finishScreenStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL) {
         bool anyPrinting = false;

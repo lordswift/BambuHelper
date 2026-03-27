@@ -32,6 +32,21 @@
 - **Instant brightness feedback** - moving the brightness slider (normal or night) now updates the display in real-time without pressing Save
 - Lightweight `/brightness` endpoint - no NVS writes until Apply is clicked
 
+## H2 dual nozzle - right nozzle filament display (FIX)
+
+- **Right nozzle filament now shown** - previously only the left nozzle's filament was displayed (tray_now only reports left nozzle). Now uses per-nozzle `snow` field from `extruder.info[]` to determine the active tray for each nozzle independently
+- Filament color and name display correctly regardless of which nozzle is printing
+- Works with any AMS configuration across both nozzles
+
+## Door open acknowledge after print (NEW)
+
+- **Wait for door open before screen timeout** - on printers with a door sensor (H2 series), the finish screen stays active until the enclosure door is opened, treating it as acknowledgment that the print was removed
+- After door opens, the normal display timeout starts (configurable minutes to clock/off)
+- "Open door to dismiss" indicator shown in orange on the finish screen while waiting
+- Optional - enable via checkbox in Display settings ("Wait for door open after print")
+- Printers without a door sensor ignore this setting and use normal timeout behavior
+- Door sensor state parsed from MQTT `stat` field (hex, bit 0x00800000)
+
 ## Bug fixes
 
 - **Stale cloud data showing wrong screen** - when cloud printer (H2C) stopped sending MQTT data for 5+ minutes, the display fell back to 2-gauge idle screen with "RUNNING" text instead of the 6-gauge printing dashboard. Stale timeout now properly resets both the printing flag and gcode state.
@@ -50,5 +65,5 @@
 
 ## Build stats
 
-- **ESP32-S3** (lolin_s3_mini): Flash 90.2% (1182KB), RAM 15.7% (51KB)
+- **ESP32-S3** (lolin_s3_mini): Flash 90.4% (1184KB), RAM 15.7% (51KB)
 - **CYD** (esp32dev): Flash 94.7% (1240KB), RAM 16.0% (52KB)
