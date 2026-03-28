@@ -307,6 +307,15 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         Note: Without a physical button, display will show clock instead of turning off (no way to wake manually).
       </div>
 
+      <label for="cydextra" style="margin-top:12px">CYD Extra Area (240x320 / 320x240 only)</label>
+      <select id="cydextra">
+        <option value="0" %CYDEX0%>AMS Filament</option>
+        <option value="1" %CYDEX1%>Extra Gauges (Chamber + Heatbreak Fan)</option>
+      </select>
+      <div style="font-size:11px;color:#8B949E;margin-top:2px">
+        Controls what is shown in the extra space on CYD displays. Has no effect on 240x240 screens.
+      </div>
+
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
         <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Clock Settings</h3>
         <label for="tz">Timezone (DST switches automatically)</label>
@@ -948,11 +957,10 @@ static void replaceGaugeColors(String& page, const char* prefix, const GaugeColo
 // ---------------------------------------------------------------------------
 //  Template processor
 // ---------------------------------------------------------------------------
-static String processTemplate(const String& html) {
+static void processTemplate(String& page) {
   PrinterConfig& cfg = printers[0].config;
   BambuState& st = printers[0].state;
 
-  String page = html;
   page.replace("%SSID%", wifiSSID);
   page.replace("%PASS%", wifiPass);
   page.replace("%MODE_LOCAL%", cfg.mode == CONN_LOCAL ? "selected" : "");
@@ -1036,6 +1044,10 @@ static String processTemplate(const String& html) {
   page.replace("%PONG%", dispSettings.pongClock ? "checked" : "");
   page.replace("%SLBL%", dispSettings.smallLabels ? "checked" : "");
 
+  // CYD extra area mode
+  page.replace("%CYDEX0%", dispSettings.cydExtraMode == 0 ? "selected" : "");
+  page.replace("%CYDEX1%", dispSettings.cydExtraMode == 1 ? "selected" : "");
+
   // Global colors
   char buf[8];
   rgb565ToHtml(dispSettings.bgColor, buf);
@@ -1085,7 +1097,6 @@ static String processTemplate(const String& html) {
   page.replace("%BUZ_QS%", String(buzzerSettings.quietStartHour));
   page.replace("%BUZ_QE%", String(buzzerSettings.quietEndHour));
 
-  return page;
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,6 +1149,10 @@ static void readDisplayFromForm() {
   dispSettings.animatedBar = server.hasArg("abar");
   dispSettings.pongClock = server.hasArg("pong");
   dispSettings.smallLabels = server.hasArg("slbl");
+  if (server.hasArg("cydextra")) {
+    uint8_t mode = server.arg("cydextra").toInt();
+    if (mode <= 1) dispSettings.cydExtraMode = mode;
+  }
 
   // Clock settings (timezone, 24h)
   if (server.hasArg("tz")) {
@@ -1160,8 +1175,9 @@ static void handleRoot() {
     server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.send(200, "text/html", FPSTR(PAGE_AP_HTML));
   } else {
-    String html = FPSTR(PAGE_HTML);
-    server.send(200, "text/html", processTemplate(html));
+    String page = FPSTR(PAGE_HTML);
+    processTemplate(page);
+    server.send(200, "text/html", page);
   }
 }
 

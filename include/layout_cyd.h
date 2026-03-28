@@ -91,7 +91,7 @@
 #define LY_IDLE_NP_OPEN_Y   165
 #define LY_IDLE_NP_IP_Y     200
 
-// --- Finished screen ---
+// --- Finished screen (portrait) ---
 #define LY_FIN_GAUGE_R   32
 #define LY_FIN_GL        72
 #define LY_FIN_GR        168
@@ -101,6 +101,24 @@
 #define LY_FIN_BOT_Y    290
 #define LY_FIN_BOT_H    22
 #define LY_FIN_WIFI_Y   308
+// --- Finished screen (landscape overrides - fit within 240px height) ---
+#define LY_LAND_FIN_BOT_Y    216
+#define LY_LAND_FIN_BOT_H    20
+#define LY_LAND_FIN_WIFI_Y   228
+
+// --- Extra gauges zone (mini-gauges for CYD extra area) ---
+// Portrait: between gauge row 2 and ETA (y=190-246)
+#define LY_EXTRA_PORT_Y     190
+#define LY_EXTRA_PORT_H     56
+#define LY_EXTRA_PORT_GR    18     // mini-gauge radius
+#define LY_EXTRA_PORT_GY    214    // mini-gauge center Y
+#define LY_EXTRA_PORT_G1X   70     // first gauge center X
+#define LY_EXTRA_PORT_G2X   170    // second gauge center X
+// Landscape: right sidebar (same area as AMS)
+#define LY_EXTRA_LAND_GR    18     // mini-gauge radius
+#define LY_EXTRA_LAND_GX    280    // center X in sidebar
+#define LY_EXTRA_LAND_G1Y   80     // first gauge center Y
+#define LY_EXTRA_LAND_G2Y   180    // second gauge center Y
 
 // --- AP mode screen (same as default) ---
 #define LY_AP_TITLE_Y     40

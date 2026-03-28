@@ -212,7 +212,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
     while (objStart < payloadEnd && (*objStart == ' ' || *objStart == '\t')) objStart++;
     if (objStart < payloadEnd && *objStart == '{') {
       JsonDocument extDoc;
-      if (!deserializeJson(extDoc, objStart)) {
+      if (!deserializeJson(extDoc, objStart, (size_t)(payloadEnd - objStart))) {
         JsonArray info = extDoc["info"];
         if (info.size() >= 2) {
           if (!s.dualNozzle) Serial.println("MQTT: dual nozzle DETECTED (H2D/H2C)");
@@ -286,10 +286,11 @@ static void parseMqttPayload(byte* payload, unsigned int length,
           s.ams.present = true;
           s.ams.unitCount = 0;
 
-          if (amsDoc["tray_now"].is<const char*>())
+          // tray_now: flat tray index from the printer. For dual nozzle (H2D/H2C)
+          // this only reflects one nozzle, so skip it - the per-nozzle snow field
+          // from extruder.info[] is authoritative (parsed above).
+          if (amsDoc["tray_now"].is<const char*>() && !s.dualNozzle)
             s.ams.activeTray = atoi(amsDoc["tray_now"].as<const char*>());
-
-          // tray_now only present in pushall, not deltas
 
           JsonArray units = amsDoc["ams"];
           for (JsonObject unit : units) {
@@ -342,7 +343,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
       while (v < payloadEnd && (*v == ' ' || *v == '\n' || *v == '\r' || *v == '\t')) v++;
       if (v < payloadEnd && *v == '{') {
         JsonDocument vtDoc;
-        if (!deserializeJson(vtDoc, v)) {
+        if (!deserializeJson(vtDoc, v, (size_t)(payloadEnd - v))) {
           if (vtDoc["tray_type"].is<const char*>()) {
             s.ams.vtPresent = true;
             if (vtDoc["tray_color"].is<const char*>())
@@ -774,10 +775,13 @@ void initBambuMqtt() {
     conns[i].active = false;
   }
 
-  // First: do all cloud API work (userId extraction) before any MQTT connects
+  // First: do all cloud API work (userId extraction) before any MQTT connects.
+  // Note: isPrinterConfigured() requires cloudUserId for cloud slots, so we check
+  // the prerequisites (serial + cloud mode) directly to allow self-healing slots
+  // that have a token but are missing cloudUserId.
   for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
     PrinterConfig& cfg = printers[i].config;
-    if (isPrinterConfigured(i) && isCloudMode(cfg.mode) && strlen(cfg.cloudUserId) == 0) {
+    if (isCloudMode(cfg.mode) && strlen(cfg.serial) > 0 && strlen(cfg.cloudUserId) == 0) {
       Serial.printf("MQTT: [%d] cloud printer needs userId extraction\n", i);
       // userId extraction uses HTTPClient (TLS) — must complete before MQTT TLS
       char tokenBuf[1200];

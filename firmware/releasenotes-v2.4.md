@@ -49,11 +49,14 @@
 
 ## Bug fixes
 
+- **MQTT parser buffer overread** - `deserializeJson()` for extruder and vt_tray sections was called without a length limit, allowing reads past the MQTT payload buffer. Now bounded by payload size.
+- **Timezone migration never persisted** - NVS Preferences were opened read-only during `loadSettings()`, so the old-to-new timezone format migration wrote correctly to RAM but silently failed to save to flash. Migration re-ran on every boot. Now properly reopens in write mode for migration.
+- **Cloud printer userId self-heal broken** - `isPrinterConfigured()` required `cloudUserId` for cloud slots, but `initBambuMqtt()` only tried userId extraction when `isPrinterConfigured()` was true AND `cloudUserId` was empty - a logical contradiction. Cloud slots with token+serial but missing userId could never recover without manual re-save.
 - **Stale cloud data showing wrong screen** - when cloud printer (H2C) stopped sending MQTT data for 5+ minutes, the display fell back to 2-gauge idle screen with "RUNNING" text instead of the 6-gauge printing dashboard. Stale timeout now properly resets both the printing flag and gcode state.
 - **Idle/blank screen never triggered with offline printers** - when both printers were off or unreachable at startup, the display stayed on the "Connecting to Printer" screen forever and never transitioned to clock or blank screen. Idle timeout now also applies to the connecting screen.
 - **No path from idle to screen off** - when "Show clock after finish" was disabled, the idle screen had no timeout path to screen off (only idle-to-clock existed). Both clock and off transitions now work from idle and connecting screens.
 
-## ESP32-2432S028 (CYD) support - Beta
+## ESP32-2432S028 (CYD) support
 
 - **New build target** - ESP32-2432S028 ("Cheap Yellow Display") with ILI9341 2.8" 320x240 in portrait mode (240x320)
 - Separate PlatformIO environment (`pio run -e cyd`), does not affect the existing S3+ST7789 build
@@ -61,9 +64,11 @@
 - **XPT2046 touchscreen** as button replacement - tap anywhere to wake display or cycle printers
 - New button type "Touchscreen (XPT2046)" in web UI, auto-enabled on CYD builds
 - `merge_bins.py` supports `--board cyd` for CYD firmware packaging (bootloader offset 0x1000)
-- MVP layout: gauge grid identical to 240x240, bottom elements (ETA, status bar) anchored to 320px height
+- **Full landscape support** - rotation 90/270 now works correctly on CYD (320x240 actual). Idle, finished, and printing screens use runtime dimensions instead of compile-time portrait constants. No more off-screen elements.
+- **AMS in both orientations** - AMS filament visualization renders in portrait (horizontal strip) and landscape (vertical sidebar). Previously landscape was blocked by a `!land` guard despite the renderer being complete.
+- **CYD Extra Area Mode (NEW)** - new setting in Display section of web UI: choose between "AMS Filament" or "Extra Gauges (Chamber + Heatbreak Fan)" for the extra CYD screen space. In portrait, extra gauges appear between the gauge rows and ETA. In landscape, they appear in the right sidebar. Setting has no effect on 240x240 displays.
 
 ## Build stats
 
-- **ESP32-S3** (lolin_s3_mini): Flash 90.4% (1184KB), RAM 15.7% (51KB)
-- **CYD** (esp32dev): Flash 94.7% (1240KB), RAM 16.0% (52KB)
+- **ESP32-S3** (lolin_s3_mini): Flash 90.3% (1184KB), RAM 15.7% (51KB)
+- **CYD** (esp32dev): Flash 94.9% (1244KB), RAM 16.1% (52KB)

@@ -47,6 +47,44 @@ uint16_t bambuColorToRgb565(const char* rrggbbaa) {
     g = (rgba >> 8) & 0xFF;
     b = rgba & 0xFF;
   }
+
+  // --- Saturation & Brightness Boost ---
+  // Bambu Lab's MQTT hex colors are often extremely pastel (washed out),
+  // causing CYD TFT displays to render them with an ugly dithered look.
+  // We boost saturation by pulling the lowest RGB value closer to 0.
+  uint8_t max_val = r;
+  if (g > max_val) max_val = g;
+  if (b > max_val) max_val = b;
+  
+  uint8_t min_val = r;
+  if (g < min_val) min_val = g;
+  if (b < min_val) min_val = b;
+
+  if (max_val > 0 && max_val > min_val) {
+    // Avoid blowing out almost-grey colors (like silver/grey filaments)
+    // Only boost if there is a distinct color (saturation > 10%)
+    if ((max_val - min_val) > (max_val / 10)) {
+       float scale = (float)max_val / (max_val - min_val);
+       float full_r = (r - min_val) * scale;
+       float full_g = (g - min_val) * scale;
+       float full_b = (b - min_val) * scale;
+
+       // Blend 65% towards fully saturated color to make it pop
+       float blend = 0.65f;
+       r = (uint8_t)(r + (full_r - r) * blend);
+       g = (uint8_t)(g + (full_g - g) * blend);
+       b = (uint8_t)(b + (full_b - b) * blend);
+    }
+  }
+
+  // Boost global brightness of the color so it's not too dark on the TFT
+  if (max_val > 0 && max_val < 220) {
+    float b_scale = 220.0f / max_val;
+    r = (uint8_t)(r * b_scale);
+    g = (uint8_t)(g * b_scale);
+    b = (uint8_t)(b * b_scale);
+  }
+
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
@@ -67,6 +105,7 @@ void defaultDisplaySettings(DisplaySettings& ds) {
   ds.animatedBar = true;
   ds.pongClock = false;
   ds.smallLabels = false;
+  ds.cydExtraMode = 0;
 
   // Progress: green arc, green label, white value
   ds.progress = { CLR_GREEN, CLR_GREEN, CLR_TEXT };
@@ -161,6 +200,7 @@ void loadSettings() {
   dispSettings.animatedBar = prefs.getBool("dsp_abar", def.animatedBar);
   dispSettings.pongClock = prefs.getBool("dsp_pong", def.pongClock);
   dispSettings.smallLabels = prefs.getBool("dsp_slbl", def.smallLabels);
+  dispSettings.cydExtraMode = prefs.getUChar("dsp_cydex", 0);
 
   loadGaugeColors("gc_prg", dispSettings.progress, def.progress);
   loadGaugeColors("gc_noz", dispSettings.nozzle, def.nozzle);
@@ -200,9 +240,14 @@ void loadSettings() {
         break;
       }
     }
-    // Save new format so migration only happens once
+    // Save new format so migration only happens once.
+    // prefs is open read-only here, so reopen in write mode for migration.
+    prefs.end();
+    prefs.begin(NVS_NAMESPACE, false);
     prefs.putString("net_tzstr", netSettings.timezoneStr);
     prefs.putUChar("net_tzidx", netSettings.timezoneIndex);
+    prefs.end();
+    prefs.begin(NVS_NAMESPACE, true);  // back to read-only for remaining loads
     Serial.printf("Timezone migrated from offset %d -> %s\n", oldOffset, netSettings.timezoneStr);
   }
   netSettings.use24h = prefs.getBool("net_24h", true);
@@ -267,6 +312,7 @@ void saveSettings() {
   prefs.putBool("dsp_abar", dispSettings.animatedBar);
   prefs.putBool("dsp_pong", dispSettings.pongClock);
   prefs.putBool("dsp_slbl", dispSettings.smallLabels);
+  prefs.putUChar("dsp_cydex", dispSettings.cydExtraMode);
 
   saveGaugeColors("gc_prg", dispSettings.progress);
   saveGaugeColors("gc_noz", dispSettings.nozzle);

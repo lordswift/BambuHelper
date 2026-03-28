@@ -50,6 +50,12 @@ static int httpsRequest(const char* method, const char* url,
                         String& response) {
   WiFiClientSecure* tls = new (std::nothrow) WiFiClientSecure();
   if (!tls) return -1;
+  // TODO: setInsecure() disables TLS certificate verification. Ideally we'd use
+  // a CA bundle (like esp_crt_bundle_attach) for proper verification, but:
+  // - Bambu Cloud API may use different CDN/CA chains than the MQTT endpoint
+  // - ESP32 RAM is tight and a second CA cert alongside MQTT's would risk OOM
+  // - The CA chain could rotate, breaking connectivity on deployed devices
+  // Risk is limited to MITM on the local network during cloud API calls.
   tls->setInsecure();
   tls->setTimeout(10);
 
