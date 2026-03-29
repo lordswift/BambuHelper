@@ -334,6 +334,15 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
           <input type="checkbox" id="use24h" value="1" %USE24H% onchange="toggleSetting('use24h',this.checked)">
           <label for="use24h">24-hour time format</label>
         </div>
+        <label for="datefmt" style="margin-top:10px">Date format</label>
+        <select id="datefmt">
+          <option value="0" %DATEFMT0%>DD.MM.YYYY (31.12.2025)</option>
+          <option value="1" %DATEFMT1%>DD-MM-YYYY (31-12-2025)</option>
+          <option value="2" %DATEFMT2%>MM/DD/YYYY (12/31/2025)</option>
+          <option value="3" %DATEFMT3%>YYYY-MM-DD (2025-12-31)</option>
+          <option value="4" %DATEFMT4%>DD MMM YYYY (31 Dec 2025)</option>
+          <option value="5" %DATEFMT5%>MMM DD, YYYY (Dec 31, 2025)</option>
+        </select>
       </div>
 
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
@@ -858,6 +867,7 @@ function applyDisplay(){
   if(document.getElementById('slbl').checked) p.append('slbl','1');
   p.append('tz',document.getElementById('tz').value);
   if(document.getElementById('use24h').checked) p.append('use24h','1');
+  p.append('datefmt',document.getElementById('datefmt').value);
   p.append('clr_bg',document.getElementById('clr_bg').value);
   p.append('clr_track',document.getElementById('clr_track').value);
   var g=['prg','noz','bed','pfn','afn','cfn'];
@@ -1105,7 +1115,7 @@ static void processTemplate(String& page) {
   page.replace("%NET_DNS%", netSettings.dns);
   page.replace("%SHOWIP%", netSettings.showIPAtStartup ? "checked" : "");
 
-  // Timezone dropdown (generated from database)
+  // Timezone dropdown (generated from database, sorted by UTC offset)
   {
     size_t tzCount;
     const TimezoneRegion* regions = getSupportedTimezones(&tzCount);
@@ -1123,6 +1133,10 @@ static void processTemplate(String& page) {
   }
 
   page.replace("%USE24H%", netSettings.use24h ? "checked" : "");
+  for (int i = 0; i < 6; i++) {
+    char ph[12]; snprintf(ph, sizeof(ph), "%%DATEFMT%d%%", i);
+    page.replace(ph, netSettings.dateFormat == i ? "selected" : "");
+  }
 
   // Rotation dropdown
   page.replace("%ROT0%", dispSettings.rotation == 0 ? "selected" : "");
@@ -1293,6 +1307,10 @@ static void readDisplayFromForm() {
     }
   }
   netSettings.use24h = server.hasArg("use24h");
+  if (server.hasArg("datefmt")) {
+    int df = server.arg("datefmt").toInt();
+    if (df >= 0 && df <= 5) netSettings.dateFormat = (uint8_t)df;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1697,6 +1715,7 @@ static void handleSettingsExport() {
   net["timezoneIndex"] = netSettings.timezoneIndex;
   net["timezoneStr"] = netSettings.timezoneStr;
   net["use24h"] = netSettings.use24h;
+  net["dateFormat"] = netSettings.dateFormat;
 
   // Rotation
   JsonObject rot = doc["rotation"].to<JsonObject>();
@@ -1839,6 +1858,7 @@ static void handleSettingsImportFinish() {
       if (migrated) strlcpy(netSettings.timezoneStr, migrated, sizeof(netSettings.timezoneStr));
     }
     if (net["use24h"].is<bool>())             netSettings.use24h = net["use24h"].as<bool>();
+    if (net["dateFormat"].is<uint8_t>())     netSettings.dateFormat = net["dateFormat"].as<uint8_t>();
   }
 
   // Rotation

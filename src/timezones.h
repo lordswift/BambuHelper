@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 struct TimezoneRegion {
-  const char* name;           // Display name (e.g., "Central European (Poland, Germany)")
+  const char* name;           // Display name, Windows-style (e.g., "(UTC+01:00) Amsterdam, Berlin, Rome")
   const char* posixString;    // POSIX TZ string for configTzTime()
 };
 

@@ -222,7 +222,16 @@ void loadSettings() {
   String tzStr = prefs.getString("net_tzstr", "");
   if (tzStr.length() > 0) {
     strlcpy(netSettings.timezoneStr, tzStr.c_str(), sizeof(netSettings.timezoneStr));
-    netSettings.timezoneIndex = prefs.getUChar("net_tzidx", 3); // default: CET
+    // Re-resolve index from TZ string (handles database reordering across updates)
+    size_t cnt;
+    const TimezoneRegion* tz = getSupportedTimezones(&cnt);
+    netSettings.timezoneIndex = 14; // default: CET (Amsterdam, Berlin, Rome)
+    for (size_t i = 0; i < cnt; i++) {
+      if (strcmp(tz[i].posixString, netSettings.timezoneStr) == 0) {
+        netSettings.timezoneIndex = (uint8_t)i;
+        break;
+      }
+    }
   } else {
     // Migration: convert old gmtOffsetMin to POSIX string
     int16_t oldOffset = prefs.getShort("net_tz", 60);
@@ -235,7 +244,7 @@ void loadSettings() {
     // Find matching index in database
     size_t count;
     const TimezoneRegion* regions = getSupportedTimezones(&count);
-    netSettings.timezoneIndex = 3; // default: CET
+    netSettings.timezoneIndex = 14; // default: CET (Amsterdam, Berlin, Rome)
     for (size_t i = 0; i < count; i++) {
       if (strcmp(regions[i].posixString, netSettings.timezoneStr) == 0) {
         netSettings.timezoneIndex = (uint8_t)i;
@@ -253,6 +262,7 @@ void loadSettings() {
     Serial.printf("Timezone migrated from offset %d -> %s\n", oldOffset, netSettings.timezoneStr);
   }
   netSettings.use24h = prefs.getBool("net_24h", true);
+  netSettings.dateFormat = prefs.getUChar("net_datefmt", 0);
 
   // Display power settings
   dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
@@ -343,6 +353,7 @@ void saveSettings() {
   prefs.putString("net_tzstr", netSettings.timezoneStr);
   prefs.putUChar("net_tzidx", netSettings.timezoneIndex);
   prefs.putBool("net_24h", netSettings.use24h);
+  prefs.putUChar("net_datefmt", netSettings.dateFormat);
 
   // Display power settings
   prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
