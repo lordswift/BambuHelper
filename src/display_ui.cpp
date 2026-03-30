@@ -82,10 +82,13 @@ static bool tickGaugeSmooth(const BambuState& s, bool snap) {
 // ---------------------------------------------------------------------------
 //  Backlight
 // ---------------------------------------------------------------------------
+static uint8_t lastAppliedBrightness = 0;
+
 void setBacklight(uint8_t level) {
 #if defined(BACKLIGHT_PIN) && BACKLIGHT_PIN >= 0
   analogWrite(BACKLIGHT_PIN, level);
 #endif
+  lastAppliedBrightness = level;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +147,12 @@ void applyDisplaySettings() {
   tft.setRotation(dispSettings.rotation);
   tft.fillScreen(dispSettings.bgColor);
   forceRedraw = true;
+  lastDisplayUpdate = 0;  // bypass throttle so redraw is immediate after fillScreen
+  // Reset clock/pong so they redraw fully after fillScreen cleared everything
+  if (currentScreen == SCREEN_CLOCK) {
+    if (dispSettings.pongClock) resetPongClock();
+    else resetClock();
+  }
 }
 
 void triggerDisplayTransition() {
@@ -1263,7 +1272,7 @@ static void drawFinished() {
 //  Night mode — scheduled brightness dimming
 // ---------------------------------------------------------------------------
 static unsigned long lastNightCheck = 0;
-static uint8_t lastAppliedBrightness = 0;
+// lastAppliedBrightness declared near setBacklight() above
 
 static bool isNightHour() {
   struct tm now;

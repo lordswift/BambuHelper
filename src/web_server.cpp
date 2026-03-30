@@ -1257,16 +1257,15 @@ static void readGaugeColorsFromForm(const char* prefix, GaugeColors& gc) {
 //  Read display settings from form args
 // ---------------------------------------------------------------------------
 static void readDisplayFromForm() {
-  if (server.hasArg("bright")) {
-    brightness = server.arg("bright").toInt();
-    setBacklight(getEffectiveBrightness());
-  }
+  if (server.hasArg("bright")) brightness = server.arg("bright").toInt();
   // Night mode
   dpSettings.nightModeEnabled = server.hasArg("nighten");
   if (server.hasArg("nstart")) dpSettings.nightStartHour = server.arg("nstart").toInt();
   if (server.hasArg("nend"))   dpSettings.nightEndHour = server.arg("nend").toInt();
   if (server.hasArg("nbright")) dpSettings.nightBrightness = server.arg("nbright").toInt();
   if (server.hasArg("ssbright")) dpSettings.screensaverBrightness = server.arg("ssbright").toInt();
+  // Apply brightness after all brightness-related values are parsed
+  setBacklight(getEffectiveBrightness());
 
   if (server.hasArg("rotation")) {
     uint8_t rot = server.arg("rotation").toInt();
@@ -1425,21 +1424,32 @@ static void handleSaveWifi() {
 }
 
 // Live brightness preview (no save, just PWM update)
+// Only applies when the main display is active — during clock/screensaver
+// the screensaverBrightness governs the backlight, not the main slider.
 static void handleBrightnessPreview() {
   if (server.hasArg("val")) {
     uint8_t val = server.arg("val").toInt();
-    setBacklight(val);
+    ScreenState scr = getScreenState();
+    if (scr != SCREEN_CLOCK && scr != SCREEN_OFF) {
+      setBacklight(val);
+    }
   }
   server.send(200, "text/plain", "OK");
 }
 
 // Apply display settings live (no restart)
 static void handleApply() {
+  // Snapshot timezone before parsing — only re-init NTP if it changes.
+  // configTzTime() resets the SNTP sync status, which causes getLocalTime()
+  // to return false for up to 60s, blanking the clock screen unnecessarily.
+  char prevTz[sizeof(netSettings.timezoneStr)];
+  strlcpy(prevTz, netSettings.timezoneStr, sizeof(prevTz));
   readDisplayFromForm();
   saveSettings();
   applyDisplaySettings();
-  // Re-apply NTP if timezone changed
-  configTzTime(netSettings.timezoneStr, "pool.ntp.org", "time.nist.gov");
+  if (strcmp(netSettings.timezoneStr, prevTz) != 0) {
+    configTzTime(netSettings.timezoneStr, "pool.ntp.org", "time.nist.gov");
+  }
   server.send(200, "text/plain", "OK");
 }
 

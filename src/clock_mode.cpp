@@ -13,7 +13,14 @@ void resetClock() {
 
 void drawClock() {
   struct tm now;
-  if (!getLocalTime(&now, 0)) return;
+  if (!getLocalTime(&now, 0)) {
+    // getLocalTime() fails when SNTP sync status is reset (e.g., after a
+    // timezone change). Fall back to the raw system clock, which remains
+    // valid even without a completed NTP sync.
+    time_t t = time(nullptr);
+    if (t < 1600000000UL) return;  // sanity: before Sep 2020 = clock not set
+    localtime_r(&t, &now);
+  }
 
   // Only redraw when minute changes (resetClock() forces redraw)
   if (now.tm_min == prevMinute) return;
