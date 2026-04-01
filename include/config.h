@@ -72,6 +72,8 @@
 #define WIFI_BACKOFF_PHASE2_START 5       // start phase 2 after this many attempts
 #define WIFI_BACKOFF_PHASE3_START 10      // start phase 3 after this many attempts
 #define WIFI_STA_PROBE_INTERVAL   120000  // 2 min between STA probes while in AP mode
+#define WIFI_STA_PROBE_CHECK_MS    10000  // 10s after probe start before checking result
+#define WIFI_AP_FALLBACK_MS       900000  // 15 min in phase 3 before falling back to AP
 
 // =============================================================================
 //  NVS
