@@ -1409,19 +1409,6 @@ void updateDisplay() {
     prevScreen = currentScreen;
   }
 
-  // Stuck-state timeout: recover if stuck in a connecting screen too long
-  if ((currentScreen == SCREEN_CONNECTING_WIFI || currentScreen == SCREEN_CONNECTING_MQTT) &&
-      connectScreenStart > 0 &&
-      millis() - connectScreenStart > DISPLAY_STATE_TIMEOUT_MS) {
-    Serial.println("[DISPLAY] State timeout, recovering to idle");
-    connectScreenStart = 0;
-    if (dpSettings.showClockAfterFinish) {
-      currentScreen = SCREEN_CLOCK;
-    } else {
-      currentScreen = SCREEN_IDLE;
-    }
-  }
-
   switch (currentScreen) {
     case SCREEN_SPLASH:
       // Splash shown in initDisplay(), auto-advance handled by main.cpp

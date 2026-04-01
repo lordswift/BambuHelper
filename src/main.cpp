@@ -15,6 +15,7 @@ static unsigned long finishScreenStart = 0;
 static bool finishActive = false;          // guards finishScreenStart against millis() wrap
 static unsigned long idleClockStart = 0;  // when all printers became idle
 static bool idleClockActive = false;      // guards idleClockStart against millis() wrap
+static unsigned long connectingScreenStart = 0;  // for stuck-state timeout
 static char prevGcodeState[MAX_ACTIVE_PRINTERS][16] = {{0}};
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,7 @@ void loop() {
                current != SCREEN_OFF && current != SCREEN_CLOCK) {
       setScreenState(SCREEN_CONNECTING_MQTT);
       finishActive = false;
+      connectingScreenStart = millis();
     } else if (!s.connected && (current == SCREEN_OFF || current == SCREEN_CLOCK)) {
       // Stay off/clock when printer is disconnected/off
     } else if (s.connected && s.printing) {
@@ -278,6 +280,25 @@ void loop() {
     }
   } else if (cur != SCREEN_IDLE && cur != SCREEN_CONNECTING_MQTT) {
     idleClockActive = false;
+  }
+
+  // Stuck-state timeout: recover if stuck in a connecting screen too long
+  {
+    ScreenState curConn = getScreenState();
+    if (curConn == SCREEN_CONNECTING_WIFI || curConn == SCREEN_CONNECTING_MQTT) {
+      if (connectingScreenStart == 0) connectingScreenStart = millis();
+      if (millis() - connectingScreenStart > DISPLAY_STATE_TIMEOUT_MS) {
+        Serial.println("[MAIN] State timeout, recovering from connecting screen");
+        connectingScreenStart = 0;
+        if (dpSettings.showClockAfterFinish) {
+          setScreenState(SCREEN_CLOCK);
+        } else {
+          setScreenState(SCREEN_IDLE);
+        }
+      }
+    } else {
+      connectingScreenStart = 0;
+    }
   }
 
   // Check for error state transition on any printer
