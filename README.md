@@ -104,7 +104,7 @@ A button or touch sensor is optional. It cycles between printers and wakes the d
 
 | TTP223 Pin | ESP32-S3 GPIO | ESP32-C3 GPIO |
 |---|---|---|
-| `VCC` | `5V` | `5V` |
+| `VCC` | `3.3V` | `3.3V` |
 | `GND` | `GND` | `GND` |
 | `SIG` | `GPIO 4` | `GPIO 4` |
 
