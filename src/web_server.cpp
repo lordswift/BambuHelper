@@ -1573,38 +1573,50 @@ static bool resolvePlaceholder(const char* name, String& out) {
 
 // ---------------------------------------------------------------------------
 //  Stream the HTML template from PROGMEM, resolving placeholders on the fly.
-//  Peak heap: ~CHUNK_SIZE bytes instead of ~64KB for the full page.
+//  All output (literal HTML + placeholder values) goes into a single buffer;
+//  sendContent() is called only when the buffer fills up, minimizing TCP writes.
 // ---------------------------------------------------------------------------
 static void streamTemplate() {
-  static const size_t CHUNK_SIZE = 512;
+  static const size_t BUF_SIZE = 2048;
+  char* buf = (char*)malloc(BUF_SIZE + 1);
+  if (!buf) {
+    server.send(503, "text/plain", "Out of memory");
+    return;
+  }
+  size_t bufLen = 0;
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   server.send(200, "text/html", "");
 
-  // On ESP32, PROGMEM is directly memory-mapped and readable as const char*.
-  const char* tmpl = PAGE_HTML;
-  const size_t tmplLen = sizeof(PAGE_HTML) - 1;
-  const char* end = tmpl + tmplLen;
-
-  // Buffer for accumulating literal HTML before flushing
-  const char* chunkStart = tmpl;
-
-  // Helper lambda: flush literal bytes from PROGMEM [chunkStart..pos)
-  auto flushTo = [&](const char* pos) {
-    while (chunkStart < pos) {
-      size_t n = pos - chunkStart;
-      if (n > CHUNK_SIZE) n = CHUNK_SIZE;
-      // Copy to stack buffer to create String for sendContent
-      char stackBuf[CHUNK_SIZE + 1];
-      memcpy(stackBuf, chunkStart, n);
-      stackBuf[n] = '\0';
-      server.sendContent(stackBuf);
-      chunkStart += n;
+  // Flush buffer to client
+  auto flush = [&]() {
+    if (bufLen > 0) {
+      buf[bufLen] = '\0';
+      server.sendContent(buf);
+      bufLen = 0;
     }
   };
 
+  // Append data to buffer, flushing when full
+  auto emit = [&](const char* data, size_t len) {
+    while (len > 0) {
+      size_t space = BUF_SIZE - bufLen;
+      size_t n = len < space ? len : space;
+      memcpy(buf + bufLen, data, n);
+      bufLen += n;
+      data += n;
+      len -= n;
+      if (bufLen >= BUF_SIZE) flush();
+    }
+  };
+
+  // On ESP32, PROGMEM is directly memory-mapped and readable as const char*.
+  const char* tmpl = PAGE_HTML;
+  const char* end = tmpl + sizeof(PAGE_HTML) - 1;
   const char* pos = tmpl;
+  const char* literalStart = tmpl;
+
   while (pos < end) {
     // Look for '%' - potential placeholder start
     if (*pos != '%') { pos++; continue; }
@@ -1618,11 +1630,7 @@ static void streamTemplate() {
     // Find closing '%'
     const char* pEnd = pos + 2;
     while (pEnd < end && *pEnd != '%' && *pEnd != '\n' && (pEnd - pos) < 30) pEnd++;
-    if (pEnd >= end || *pEnd != '%') {
-      // No closing '%' found - not a placeholder
-      pos++;
-      continue;
-    }
+    if (pEnd >= end || *pEnd != '%') { pos++; continue; }
 
     // Validate: all chars between %...% must be [A-Z0-9_]
     bool valid = true;
@@ -1644,25 +1652,24 @@ static void streamTemplate() {
     // Try to resolve
     String value;
     if (resolvePlaceholder(name, value)) {
-      // Flush everything before this placeholder
-      flushTo(pos);
-      // Send the resolved value
-      if (value.length() > 0) {
-        server.sendContent(value);
-      }
-      // Skip past closing '%'
+      // Emit literal HTML before this placeholder
+      if (pos > literalStart) emit(literalStart, pos - literalStart);
+      // Emit the resolved value
+      if (value.length() > 0) emit(value.c_str(), value.length());
+      // Advance past closing '%'
       pos = pEnd + 1;
-      chunkStart = pos;
+      literalStart = pos;
     } else {
-      // Unknown placeholder - send as literal text
       pos++;
     }
   }
 
-  // Flush remaining
-  flushTo(end);
+  // Emit remaining literal HTML
+  if (end > literalStart) emit(literalStart, end - literalStart);
+  flush();
 
   server.sendContent("");  // End chunked response
+  free(buf);
 }
 
 // ---------------------------------------------------------------------------
