@@ -1197,6 +1197,9 @@ static void drawPrinting() {
 static void drawFinished() {
   PrinterSlot& p = displayedPrinter();
   BambuState& s = p.state;
+  static bool  prevFinTasmotaOnline = false;
+  static float prevFinWatts = -2.0f;
+  static float prevFinKwh = -2.0f;
 
   // Effective screen dimensions — finished uses full screen (no AMS sidebar)
 #if defined(DISPLAY_CYD)
@@ -1295,29 +1298,33 @@ static void drawFinished() {
 
   // === kWh used during print (between filename and bottom bar) ===
   bool tasmotaActiveHere = tasmotaIsActiveForSlot(rotState.displayIndex);
-  bool kwhChanged = tasmotaActiveHere && tasmotaKwhChanged();
+  float finishKwh = tasmotaActiveHere ? tasmotaGetPrintKwhUsed() : -1.0f;
+  bool kwhChanged = (tasmotaActiveHere && tasmotaKwhChanged()) ||
+                    (tasmotaActiveHere != prevFinTasmotaOnline) ||
+                    (finishKwh != prevFinKwh);
   if (forceRedraw || kwhChanged) {
     int16_t kwhY = (LY_FIN_FILE_Y + eff_finBotY) / 2;
     tft.fillRect(0, kwhY - 9, scrW, 18, CLR_BG);
-    if (tasmotaActiveHere) {
-      float kwh = tasmotaGetPrintKwhUsed();
-      if (kwh >= 0.0f) {
-        drawIcon16(tft, cx - 32, kwhY - 8, icon_lightning, CLR_YELLOW);
-        char kwhBuf[16];
-        snprintf(kwhBuf, sizeof(kwhBuf), "%.3f kWh", kwh);
-        tft.setTextDatum(ML_DATUM);
-        tft.setTextFont(2);
-        tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
-        tft.drawString(kwhBuf, cx - 14, kwhY);
-      }
+    if (tasmotaActiveHere && finishKwh >= 0.0f) {
+      drawIcon16(tft, cx - 32, kwhY - 8, icon_lightning, CLR_YELLOW);
+      char kwhBuf[16];
+      snprintf(kwhBuf, sizeof(kwhBuf), "%.3f kWh", finishKwh);
+      tft.setTextDatum(ML_DATUM);
+      tft.setTextFont(2);
+      tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
+      tft.drawString(kwhBuf, cx - 14, kwhY);
     }
   }
+  prevFinKwh = finishKwh;
 
   // === Bottom status bar ===
   bool waitingForDoor = dpSettings.doorAckEnabled && s.doorSensorPresent && !s.doorAcknowledged;
+  float finCurWatts = tasmotaGetWatts();
   bool finBottomChanged = forceRedraw ||
                           (waitingForDoor != prevWaitingForDoor) ||
-                          (s.doorSensorPresent && s.doorOpen != prevState.doorOpen);
+                          (s.doorSensorPresent && s.doorOpen != prevState.doorOpen) ||
+                          (tasmotaActiveHere != prevFinTasmotaOnline) ||
+                          (finCurWatts != prevFinWatts);
   if (finBottomChanged) {
     prevWaitingForDoor = waitingForDoor;
     tft.fillRect(0, eff_finBotY, scrW, eff_finBotH, CLR_BG);
@@ -1333,6 +1340,15 @@ static void drawFinished() {
       char wifiBuf[12];
       snprintf(wifiBuf, sizeof(wifiBuf), "%ddBm", s.wifiSignal);
       tft.drawString(wifiBuf, 22, eff_finWifiY);
+
+      if (tasmotaActiveHere) {
+        drawIcon16(tft, cx - 20, eff_finWifiY - 8, icon_lightning, CLR_YELLOW);
+        char wBuf[8];
+        snprintf(wBuf, sizeof(wBuf), "%.0fW", finCurWatts);
+        tft.setTextDatum(ML_DATUM);
+        tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
+        tft.drawString(wBuf, cx - 2, eff_finWifiY);
+      }
     }
     // Door status (right) — always show when sensor present
     if (s.doorSensorPresent) {
@@ -1345,6 +1361,8 @@ static void drawFinished() {
                  s.doorOpen ? icon_unlock : icon_lock, clr);
     }
   }
+  prevFinTasmotaOnline = tasmotaActiveHere;
+  prevFinWatts = finCurWatts;
 }
 
 // ---------------------------------------------------------------------------
