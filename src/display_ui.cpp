@@ -555,21 +555,9 @@ static void drawIdle() {
   }
 
   // Bottom status bar: Filament/WiFi | Power | Door
-  static bool     idleAltShowPower    = false;
-  static uint32_t idleAltFlipMs       = 0;
-  static bool     idlePrevAltShowPower = false;
   static bool     idlePrevTasmotaOnline = false;
   static float    idlePrevWatts        = -2.0f;
 
-  if (tasmotaSettings.enabled && tasmotaSettings.displayMode == 0) {
-    if (millis() - idleAltFlipMs > 4000) {
-      idleAltShowPower = !idleAltShowPower;
-      idleAltFlipMs    = millis();
-    }
-  } else {
-    idleAltShowPower = false;
-    idleAltFlipMs    = 0;
-  }
   bool idleTasmotaOnline = tasmotaIsActiveForSlot(rotState.displayIndex);
   float idleCurWatts = tasmotaGetWatts();
 
@@ -578,10 +566,8 @@ static void drawIdle() {
                        (s.ams.activeTray != prevState.ams.activeTray) ||
                        (s.doorOpen != prevState.doorOpen) ||
                        (s.doorSensorPresent != prevState.doorSensorPresent) ||
-                       (tasmotaSettings.enabled && (idleAltShowPower != idlePrevAltShowPower ||
-                                                    idleTasmotaOnline != idlePrevTasmotaOnline ||
+                       (tasmotaSettings.enabled && (idleTasmotaOnline != idlePrevTasmotaOnline ||
                                                     idleCurWatts != idlePrevWatts));
-  idlePrevAltShowPower   = idleAltShowPower;
   idlePrevTasmotaOnline  = idleTasmotaOnline;
   idlePrevWatts          = idleCurWatts;
 
@@ -608,8 +594,8 @@ static void drawIdle() {
     }
 
     // Center: power watts (if Tasmota online)
-    bool showPower = idleTasmotaOnline &&
-                     (tasmotaSettings.displayMode == 1 || idleAltShowPower);
+    // Ready screen has no layer count, so always show power (no alternation)
+    bool showPower = idleTasmotaOnline;
     if (showPower) {
       drawIcon16(tft, cx - 20, botCY - 8, icon_lightning, CLR_YELLOW);
       char wBuf[8];
